@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ops::DerefMut;
+use std::sync::Arc;
 
 use anyhow::Context;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -19,7 +20,7 @@ pub trait AutoStartConfig: Send + Sync + 'static {
     fn repo_client(
         &self,
         repo_id: RepositoryId,
-    ) -> impl std::future::Future<Output = anyhow::Result<Option<Self::RepoClient>>> + Send;
+    ) -> impl std::future::Future<Output = anyhow::Result<Option<Arc<Self::RepoClient>>>> + Send;
 
     fn database(
         &self,
@@ -65,7 +66,7 @@ impl<C: AutoStartConfig> scuffle_bootstrap::Service<C> for AutoStartSvc {
                     continue;
                 };
 
-                if let Err(e) = handle_run(run, &repo_client, &mut conn).await {
+                if let Err(e) = handle_run(run, repo_client.as_ref(), &mut conn).await {
                     tracing::error!(
                         "error handling run (repo id: {}, pr number: {}, run id: {}): {}",
                         run.github_repo_id,

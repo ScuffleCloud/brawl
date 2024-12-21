@@ -1,0 +1,31 @@
+[
+    {
+        "login": "TroyKomodo",
+        "id": 49777269,
+        "node_id": "MDQ6VXNlcjQ5Nzc3MjY5",
+        "avatar_url": "https://avatars.githubusercontent.com/u/49777269?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/TroyKomodo",
+        "html_url": "https://github.com/TroyKomodo",
+        "followers_url": "https://api.github.com/users/TroyKomodo/followers",
+        "following_url": "https://api.github.com/users/TroyKomodo/following{/other_user}",
+        "gists_url": "https://api.github.com/users/TroyKomodo/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/TroyKomodo/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/TroyKomodo/subscriptions",
+        "organizations_url": "https://api.github.com/users/TroyKomodo/orgs",
+        "repos_url": "https://api.github.com/users/TroyKomodo/repos",
+        "events_url": "https://api.github.com/users/TroyKomodo/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/TroyKomodo/received_events",
+        "type": "User",
+        "user_view_type": "public",
+        "site_admin": false,
+        "permissions": {
+            "admin": true,
+            "maintain": true,
+            "push": true,
+            "triage": true,
+            "pull": true
+        },
+        "role_name": "admin"
+    }
+]

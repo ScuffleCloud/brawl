@@ -132,7 +132,7 @@ mod tests {
                     &mut conn,
                     BrawlCommandContext {
                         repo: &client,
-                        pr: Arc::new(pr),
+                        pr,
                         user: User {
                             id: UserId(1),
                             login: "test".to_string(),
@@ -190,11 +190,11 @@ mod tests {
                     &mut conn,
                     BrawlCommandContext {
                         repo: &client,
-                        pr: Arc::new(PullRequest {
+                        pr: PullRequest {
                             number: 1,
                             title: "test".to_string(),
                             ..Default::default()
-                        }),
+                        },
                         user: User {
                             id: UserId(1),
                             login: "test".to_string(),
@@ -266,12 +266,12 @@ mod tests {
                     &mut conn,
                     BrawlCommandContext {
                         repo: &client,
-                        pr: Arc::new(PullRequest {
+                        pr: PullRequest {
                             number: 1,
                             title: "test".to_string(),
                             body: "test".to_string(),
                             ..Default::default()
-                        }),
+                        },
                         user: User {
                             id: UserId(1),
                             login: "test".to_string(),
@@ -330,12 +330,12 @@ mod tests {
                     &mut conn,
                     BrawlCommandContext {
                         repo: &client,
-                        pr: Arc::new(PullRequest {
+                        pr: PullRequest {
                             number: 1,
                             title: "test".to_string(),
                             body: "2".to_string(),
                             ..Default::default()
-                        }),
+                        },
                         user: User {
                             id: UserId(1),
                             login: "test".to_string(),

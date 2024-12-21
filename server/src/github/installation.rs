@@ -1,4 +1,5 @@
-use std::collections::HashSet;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -6,29 +7,20 @@ use anyhow::Context;
 use axum::http;
 use futures::TryStreamExt;
 use moka::future::Cache;
-use octocrab::models::{Installation, InstallationRepositories, Repository, RepositoryId, UserId};
+use octocrab::models::{Installation, InstallationRepositories, RepositoryId, UserId};
 use octocrab::{GitHubError, Octocrab};
 use parking_lot::Mutex;
 
-use super::config::{GitHubBrawlRepoConfig, Role};
-use super::models::{PullRequest, User};
-use super::repo::{GitHubRepoClient, RepoClient};
+use super::config::GitHubBrawlRepoConfig;
+use super::merge_workflow::DefaultMergeWorkflow;
+use super::models::{Repository, User};
+use super::repo::RepoClient;
 
-#[derive(Debug)]
 pub struct InstallationClient {
-    pub(super) client: Octocrab,
+    client: Octocrab,
     installation: Mutex<Installation>,
-    repositories: Mutex<HashSet<RepositoryId>>,
-
-    pub(super) repos: Cache<RepositoryId, Arc<(Repository, GitHubBrawlRepoConfig)>>,
-    pub(super) pulls: Cache<(RepositoryId, u64), Arc<PullRequest>>,
-
-    // This is a cache of user profiles that we load due to this installation.
-    pub(super) users: Cache<UserId, Arc<User>>,
-    pub(super) users_by_name: Cache<String, UserId>,
-
-    pub(super) teams: Cache<String, Vec<UserId>>,
-    pub(super) team_users: Cache<(RepositoryId, Role), Vec<UserId>>,
+    repositories: Mutex<HashMap<RepositoryId, Arc<RepoClient>>>,
+    user_cache: UserCache,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -43,37 +35,27 @@ pub enum GitHubBrawlRepoConfigError {
     MissingContent,
 }
 
-pub trait GitHubInstallationClient: Send + Sync {
-    type RepoClient: GitHubRepoClient;
+#[derive(Debug, Clone)]
+pub struct UserCache {
+    users: Cache<UserId, Option<User>>,
+    users_by_name: Cache<String, Option<UserId>>,
+    teams: Cache<String, Vec<UserId>>,
+}
 
-    fn get_repository(
-        &self,
-        repo_id: RepositoryId,
-    ) -> impl std::future::Future<Output = anyhow::Result<Option<Self::RepoClient>>> + Send;
+impl Default for UserCache {
+    fn default() -> Self {
+        Self::new(Duration::from_secs(60), 100)
+    }
+}
 
-    fn fetch_repositories(&self) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
-
-    fn repositories(&self) -> Vec<RepositoryId>;
-
-    fn has_repository(&self, repo_id: RepositoryId) -> bool;
-
-    fn set_repository(&self, repo: Repository) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
-
-    fn remove_repository(&self, repo_id: RepositoryId);
-
-    fn fetch_repository(&self, id: RepositoryId) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
-
-    fn get_user(&self, user_id: UserId) -> impl std::future::Future<Output = anyhow::Result<Arc<User>>> + Send;
-
-    fn get_user_by_name(&self, name: &str) -> impl std::future::Future<Output = anyhow::Result<Arc<User>>> + Send;
-
-    fn get_team_users(&self, team: &str) -> impl std::future::Future<Output = anyhow::Result<Vec<UserId>>> + Send;
-
-    fn installation(&self) -> Installation;
-
-    fn owner(&self) -> String;
-
-    fn update_installation(&self, installation: Installation);
+impl UserCache {
+    pub fn new(ttl: Duration, capacity: u64) -> Self {
+        Self {
+            users: Cache::builder().max_capacity(capacity).time_to_live(ttl).build(),
+            users_by_name: Cache::builder().max_capacity(capacity).time_to_live(ttl).build(),
+            teams: Cache::builder().max_capacity(capacity).time_to_live(ttl).build(),
+        }
+    }
 }
 
 impl InstallationClient {
@@ -81,31 +63,8 @@ impl InstallationClient {
         Ok(Self {
             client,
             installation: Mutex::new(installation),
-            repositories: Mutex::new(HashSet::new()),
-            repos: Cache::builder()
-                .max_capacity(1000)
-                .time_to_live(Duration::from_secs(60 * 5)) // 5 minutes
-                .build(),
-            pulls: Cache::builder()
-                .max_capacity(1000)
-                .time_to_live(Duration::from_secs(30)) // 30 seconds
-                .build(),
-            users: moka::future::Cache::builder()
-                .max_capacity(1000)
-                .time_to_live(Duration::from_secs(60 * 5)) // 5 minutes
-                .build(),
-            users_by_name: moka::future::Cache::builder()
-                .max_capacity(1000)
-                .time_to_live(Duration::from_secs(60 * 5)) // 5 minutes
-                .build(),
-            teams: moka::future::Cache::builder()
-                .max_capacity(50)
-                .time_to_live(Duration::from_secs(60 * 5)) // 5 minutes
-                .build(),
-            team_users: moka::future::Cache::builder()
-                .max_capacity(50)
-                .time_to_live(Duration::from_secs(60 * 5)) // 5 minutes
-                .build(),
+            repositories: Mutex::new(HashMap::new()),
+            user_cache: UserCache::default(),
         })
     }
 
@@ -148,12 +107,28 @@ impl InstallationClient {
 
         Ok(config)
     }
-}
 
-impl GitHubInstallationClient for Arc<InstallationClient> {
-    type RepoClient = RepoClient;
+    async fn set_repository(self: &Arc<Self>, repo: Repository) -> anyhow::Result<()> {
+        let config = self.get_repo_config(repo.id).await.context("get repo config")?;
+        match self.repositories.lock().entry(repo.id) {
+            Entry::Occupied(entry) => {
+                entry.get().config.store(Arc::new(config));
+                entry.get().repo.store(Arc::new(repo));
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(Arc::new(RepoClient::new(
+                    repo,
+                    config,
+                    self.client.clone(),
+                    self.user_cache.clone(),
+                    DefaultMergeWorkflow,
+                )));
+            }
+        }
+        Ok(())
+    }
 
-    async fn fetch_repositories(&self) -> anyhow::Result<()> {
+    pub async fn fetch_repositories(self: &Arc<Self>) -> anyhow::Result<()> {
         let mut repositories = Vec::new();
         let mut page = 1;
         loop {
@@ -172,9 +147,19 @@ impl GitHubInstallationClient for Arc<InstallationClient> {
             page += 1;
         }
 
-        let mut repos = HashSet::new();
+        let mut repos = HashMap::new();
         for repo in repositories {
-            repos.insert(repo.id);
+            let config = self.get_repo_config(repo.id).await?;
+            repos.insert(
+                repo.id,
+                Arc::new(RepoClient::new(
+                    repo.into(),
+                    config,
+                    self.client.clone(),
+                    self.user_cache.clone(),
+                    DefaultMergeWorkflow,
+                )),
+            );
         }
 
         *self.repositories.lock() = repos;
@@ -182,91 +167,115 @@ impl GitHubInstallationClient for Arc<InstallationClient> {
         Ok(())
     }
 
-    fn repositories(&self) -> Vec<RepositoryId> {
-        self.repositories.lock().iter().cloned().collect()
+    pub fn repositories(&self) -> Vec<RepositoryId> {
+        self.repositories.lock().keys().cloned().collect()
     }
 
-    fn has_repository(&self, repo_id: RepositoryId) -> bool {
-        self.repositories.lock().contains(&repo_id)
+    pub fn has_repository(&self, repo_id: RepositoryId) -> bool {
+        self.repositories.lock().contains_key(&repo_id)
     }
 
-    async fn get_user(&self, user_id: UserId) -> anyhow::Result<Arc<User>> {
+    pub fn get_repo_client(&self, repo_id: RepositoryId) -> Option<Arc<RepoClient>> {
+        self.repositories.lock().get(&repo_id).cloned()
+    }
+
+    pub async fn fetch_repository(self: &Arc<Self>, id: RepositoryId) -> anyhow::Result<()> {
+        let repo = self.client.repos_by_id(id).get().await.context("get repository")?;
+        self.set_repository(repo.into()).await.context("set repository")?;
+        Ok(())
+    }
+
+    pub fn remove_repository(&self, repo_id: RepositoryId) {
+        self.repositories.lock().remove(&repo_id);
+    }
+
+    pub fn installation(&self) -> Installation {
+        self.installation.lock().clone()
+    }
+
+    pub fn owner(&self) -> String {
+        self.installation.lock().account.login.clone()
+    }
+
+    pub fn update_installation(&self, installation: Installation) {
+        tracing::info!("updated installation: {} ({})", installation.account.login, installation.id);
+        *self.installation.lock() = installation;
+    }
+}
+
+impl UserCache {
+    pub async fn get_user(&self, client: &Octocrab, user_id: UserId) -> anyhow::Result<Option<User>> {
         self.users
             .try_get_with::<_, octocrab::Error>(user_id, async {
-                let user = self.client.users_by_id(user_id).profile().await?;
-                self.users_by_name.insert(user.login.to_lowercase(), user_id).await;
-                Ok(Arc::new(user.into()))
+                let user = match client.users_by_id(user_id).profile().await {
+                    Ok(user) => user,
+                    Err(octocrab::Error::GitHub {
+                        source:
+                            GitHubError {
+                                status_code: http::StatusCode::NOT_FOUND,
+                                ..
+                            },
+                        ..
+                    }) => return Ok(None),
+                    Err(e) => return Err(e),
+                };
+                self.users_by_name.insert(user.login.to_lowercase(), Some(user_id)).await;
+                Ok(Some(user.into()))
             })
             .await
             .context("get user profile")
     }
 
-    async fn get_user_by_name(&self, name: &str) -> anyhow::Result<Arc<User>> {
+    pub async fn get_user_by_name(&self, client: &Octocrab, name: &str) -> anyhow::Result<Option<User>> {
         let user_id = self
             .users_by_name
             .try_get_with::<_, octocrab::Error>(name.trim_start_matches('@').to_lowercase(), async {
-                let user = self.client.users(name).profile().await?;
+                let user = match client.users(name).profile().await {
+                    Ok(user) => user,
+                    Err(octocrab::Error::GitHub {
+                        source:
+                            GitHubError {
+                                status_code: http::StatusCode::NOT_FOUND,
+                                ..
+                            },
+                        ..
+                    }) => return Ok(None),
+                    Err(e) => return Err(e),
+                };
                 let user_id = user.id;
-                self.users.insert(user_id, Arc::new(user.into())).await;
-                Ok(user_id)
+                self.users.insert(user_id, Some(user.into())).await;
+                Ok(Some(user_id))
             })
             .await
             .context("get user by name")?;
 
-        self.get_user(user_id).await
-    }
-
-    async fn get_repository(&self, repo_id: RepositoryId) -> anyhow::Result<Option<RepoClient>> {
-        if !self.repositories.lock().contains(&repo_id) {
-            return Ok(None);
+        if let Some(user_id) = user_id {
+            self.get_user(client, user_id).await
+        } else {
+            Ok(None)
         }
-
-        self.repos
-            .try_get_with::<_, anyhow::Error>(repo_id, async {
-                let repo = self.client.repos_by_id(repo_id).get().await?;
-                let config = self.get_repo_config(repo_id).await?;
-                Ok(Arc::new((repo, config)))
-            })
-            .await
-            .map(|repo| Some(RepoClient::new(repo.clone(), self.clone())))
-            .map_err(|e| anyhow::anyhow!(e))
     }
 
-    async fn fetch_repository(&self, id: RepositoryId) -> anyhow::Result<()> {
-        let repo = self.client.repos_by_id(id).get().await.context("get repository")?;
-        self.set_repository(repo).await.context("set repository")?;
-        Ok(())
-    }
-
-    async fn set_repository(&self, repo: Repository) -> anyhow::Result<()> {
-        let config = self.get_repo_config(repo.id).await.context("get repo config")?;
-        self.repos.insert(repo.id, Arc::new((repo, config))).await;
-        Ok(())
-    }
-
-    fn remove_repository(&self, repo_id: RepositoryId) {
-        self.repositories.lock().remove(&repo_id);
-    }
-
-    fn installation(&self) -> Installation {
-        self.installation.lock().clone()
-    }
-
-    fn owner(&self) -> String {
-        self.installation.lock().account.login.clone()
-    }
-
-    fn update_installation(&self, installation: Installation) {
-        tracing::info!("updated installation: {} ({})", installation.account.login, installation.id);
-        *self.installation.lock() = installation;
-    }
-
-    async fn get_team_users(&self, team: &str) -> anyhow::Result<Vec<UserId>> {
+    pub async fn get_team_users(&self, client: &Octocrab, owner: &str, team: &str) -> anyhow::Result<Vec<UserId>> {
         self.teams
             .try_get_with_by_ref::<_, octocrab::Error, _>(team, async {
-                let team = self.client.teams(self.owner()).members(team).per_page(100).send().await?;
+                let team = match client.teams(owner).members(team).per_page(100).send().await {
+                    Ok(team) => team,
+                    Err(octocrab::Error::GitHub {
+                        source:
+                            GitHubError {
+                                status_code: http::StatusCode::NOT_FOUND,
+                                ..
+                            },
+                        ..
+                    }) => {
+                        tracing::info!("team not found: {}/{}", owner, team);
+                        return Ok(Vec::new());
+                    }
+                    Err(e) => return Err(e),
+                };
 
-                let users = team.into_stream(&self.client).try_collect::<Vec<_>>().await?;
+                let users = team.into_stream(client).try_collect::<Vec<_>>().await?;
                 Ok(users.into_iter().map(|u| u.id).collect())
             })
             .await

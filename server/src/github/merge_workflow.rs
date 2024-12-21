@@ -1,6 +1,5 @@
 use std::borrow::{Borrow, Cow};
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use anyhow::Context;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -15,9 +14,10 @@ use crate::database::ci_run_check::CiCheck;
 use crate::database::enums::{GithubCiRunStatus, GithubCiRunStatusCheckStatus};
 use crate::database::pr::Pr;
 use crate::github::repo::MergeResult;
+use crate::utils::format_fn;
 
 fn format_duration(duration: chrono::Duration) -> impl std::fmt::Display {
-    messages::format_fn(move |f| {
+    format_fn(move |f| {
         let seconds = duration.num_seconds() % 60;
         let minutes = (duration.num_seconds() / 60) % 60;
         let hours = duration.num_seconds() / 60 / 60;
@@ -34,18 +34,20 @@ fn format_duration(duration: chrono::Duration) -> impl std::fmt::Display {
     })
 }
 
-async fn fetch_approved_by(repo: &impl GitHubRepoClient, run: &CiRun<'_>) -> anyhow::Result<Vec<Arc<User>>> {
+async fn fetch_approved_by(repo: &impl GitHubRepoClient, run: &CiRun<'_>) -> anyhow::Result<Vec<User>> {
     let mut approved_by = Vec::new();
     for id in &run.approved_by_ids {
         let user = repo.get_user(UserId(*id as u64)).await?;
-        approved_by.push(user);
+        if let Some(user) = user {
+            approved_by.push(user);
+        }
     }
 
     Ok(approved_by)
 }
 
-fn build_reviewers(users: &[Arc<User>], tag: bool) -> impl std::fmt::Display + '_ {
-    messages::format_fn(move |f| {
+fn build_reviewers(users: &[User], tag: bool) -> impl std::fmt::Display + '_ {
+    format_fn(move |f| {
         if users.is_empty() {
             write!(f, "<no reviewers>")?;
             return Ok(());
@@ -238,7 +240,7 @@ impl DefaultMergeWorkflow {
             anyhow::bail!("run already completed");
         }
 
-        let checks_message = messages::format_fn(|f| {
+        let checks_message = format_fn(|f| {
             for check in checks {
                 writeln!(f, "- [{name}]({url})", name = check.status_check_name, url = check.url)?;
             }
@@ -264,7 +266,7 @@ impl DefaultMergeWorkflow {
                 &messages::tests_pass(
                     duration,
                     checks_message,
-                    &requested_by.login,
+                    requested_by.as_ref().map(|u| u.login.as_ref()).unwrap_or("ghost"),
                     repo.commit_link(run_commit_sha),
                     run_commit_sha,
                 ),
@@ -294,9 +296,7 @@ impl DefaultMergeWorkflow {
                         conn,
                         run.github_pr_number,
                         &messages::error(
-                            messages::format_fn(|f| {
-                                writeln!(f, "Tests passed but failed to push to branch {}", pr.target_branch)
-                            }),
+                            format_fn(|f| writeln!(f, "Tests passed but failed to push to branch {}", pr.target_branch)),
                             e,
                         ),
                     )
@@ -362,8 +362,9 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
         let mut success = true;
         let mut required_checks = Vec::new();
         let mut missing_checks = Vec::new();
+        let config = repo.config();
 
-        for check in &repo.config().required_status_checks {
+        for check in &config.required_status_checks {
             let Some(check) = checks.get(check.as_str()).copied() else {
                 success = false;
                 missing_checks.push((check.as_str(), None));
@@ -400,7 +401,7 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
                 run.github_pr_number,
                 &messages::tests_timeout(
                     repo.config().timeout_minutes,
-                    messages::format_fn(|f| {
+                    format_fn(|f| {
                         for (name, check) in &missing_checks {
                             if let Some(check) = check {
                                 writeln!(f, "- [{name}]({url}) (pending)", name = name, url = check.url)?;
@@ -440,7 +441,7 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
                         conn,
                         run.github_pr_number,
                         &messages::error(
-                            messages::format_fn(|f| {
+                            format_fn(|f| {
                                 writeln!(f, "Failed to find branch {branch}")
                             }),
                             "The base branch could not be found, and was likely deleted after the PR was added to the queue.",
@@ -467,17 +468,19 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
             } else if !approved_by.is_empty() {
                 build_reviewers(&approved_by, false).to_string()
             } else {
-                requested_by.login.clone()
+                requested_by.as_ref().map(|u| u.login.as_ref()).unwrap_or("ghost").to_owned()
             },
             &pr.title,
             &pr.body,
-            messages::format_fn(|f| {
-                writeln!(
-                    f,
-                    "Requested-by: {login} <{id}+{login}@users.noreply.github.com>",
-                    login = requested_by.login,
-                    id = requested_by.id
-                )?;
+            format_fn(|f| {
+                if let Some(requested_by) = requested_by.as_ref() {
+                    writeln!(
+                        f,
+                        "Requested-by: {login} <{id}+{login}@users.noreply.github.com>",
+                        login = requested_by.login,
+                        id = requested_by.id
+                    )?;
+                }
 
                 for approved_by in &approved_by {
                     writeln!(
@@ -517,7 +520,7 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
                     repo,
                     conn,
                     run.github_pr_number,
-                    &messages::error(messages::format_fn(|f| write!(f, "Failed to create merge commit")), e),
+                    &messages::error(format_fn(|f| write!(f, "Failed to create merge commit")), e),
                 )
                 .await?;
 
@@ -542,7 +545,7 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
                     conn,
                     run.github_pr_number,
                     &messages::error(
-                        messages::format_fn(|f| write!(f, "Failed to push branch {branch}", branch = run.ci_branch)),
+                        format_fn(|f| write!(f, "Failed to push branch {branch}", branch = run.ci_branch)),
                         e,
                     ),
                 )
@@ -657,7 +660,10 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
             run.github_pr_number as u64,
             &messages::commit_approved(
                 repo.commit_link(&run.head_commit_sha),
-                format!("@{login}", login = requested_by.login),
+                format!(
+                    "@{login}",
+                    login = requested_by.as_ref().map(|u| u.login.as_ref()).unwrap_or("ghost")
+                ),
                 build_reviewers(&fetch_approved_by(repo, run).await?, true),
             ),
         )
@@ -722,24 +728,26 @@ mod tests {
 
         let users = tokio::spawn(async move { fetch_approved_by(&client, &run).await.unwrap() });
 
-        let user1 = Arc::new(User {
+        let user1 = User {
             id: UserId(1),
             login: "user1".to_owned(),
-        });
+        };
 
-        let user2 = Arc::new(User {
+        let user2 = User {
             id: UserId(2),
             login: "user2".to_owned(),
-        });
+        };
 
-        let user3 = Arc::new(User {
+        let user3 = User {
             id: UserId(3),
             login: "user3".to_owned(),
-        });
+        };
 
         for user in [&user1, &user2, &user3] {
             match rx.recv().await.unwrap() {
-                MockRepoAction::GetUser { user_id, result } if user_id == user.id => result.send(Ok(user.clone())).unwrap(),
+                MockRepoAction::GetUser { user_id, result } if user_id == user.id => {
+                    result.send(Ok(Some(user.clone()))).unwrap()
+                }
                 r => panic!("unexpected action: {:?} expected get user with id {:?}", r, user.id),
             }
         }
@@ -751,19 +759,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_build_reviewers() {
-        let users: &[Arc<User>] = &[
-            Arc::new(User {
+        let users: &[_] = &[
+            User {
                 id: UserId(1),
                 login: "user1".to_owned(),
-            }),
-            Arc::new(User {
+            },
+            User {
                 id: UserId(2),
                 login: "user2".to_owned(),
-            }),
-            Arc::new(User {
+            },
+            User {
                 id: UserId(3),
                 login: "user3".to_owned(),
-            }),
+            },
         ];
 
         insta::assert_snapshot!(build_reviewers(users, true).to_string(), @"@user1 @user2 @user3");
@@ -933,7 +941,7 @@ mod tests {
             MockRepoAction::GetUser { user_id, result } => {
                 assert_eq!(user_id, UserId(1));
                 result
-                    .send(Ok(Arc::new(User {
+                    .send(Ok(Some(User {
                         id: UserId(1),
                         login: "user1".to_owned(),
                     })))
@@ -1067,7 +1075,7 @@ mod tests {
             MockRepoAction::GetUser { user_id, result } => {
                 assert_eq!(user_id, UserId(1));
                 result
-                    .send(Ok(Arc::new(User {
+                    .send(Ok(Some(User {
                         id: UserId(1),
                         login: "user1".to_owned(),
                     })))
@@ -1231,7 +1239,7 @@ mod tests {
             MockRepoAction::GetUser { user_id, result } => {
                 assert_eq!(user_id, UserId(1));
                 result
-                    .send(Ok(Arc::new(User {
+                    .send(Ok(Some(User {
                         id: UserId(1),
                         login: "user1".to_owned(),
                     })))
@@ -1497,7 +1505,7 @@ mod tests {
             MockRepoAction::GetUser { user_id, result } => {
                 assert_eq!(user_id, UserId(1));
                 result
-                    .send(Ok(Arc::new(User {
+                    .send(Ok(Some(User {
                         id: UserId(1),
                         login: "user1 (approved by)".to_owned(),
                     })))
@@ -1511,7 +1519,7 @@ mod tests {
             MockRepoAction::GetUser { user_id, result } => {
                 assert_eq!(user_id, UserId(1));
                 result
-                    .send(Ok(Arc::new(User {
+                    .send(Ok(Some(User {
                         id: UserId(1),
                         login: "user1 (requested by)".to_owned(),
                     })))
@@ -1636,7 +1644,7 @@ mod tests {
             MockRepoAction::GetUser { user_id, result } => {
                 assert_eq!(user_id, UserId(1));
                 result
-                    .send(Ok(Arc::new(User {
+                    .send(Ok(Some(User {
                         id: UserId(1),
                         login: "user1 (approved by)".to_owned(),
                     })))
@@ -1650,7 +1658,7 @@ mod tests {
             MockRepoAction::GetUser { user_id, result } => {
                 assert_eq!(user_id, UserId(1));
                 result
-                    .send(Ok(Arc::new(User {
+                    .send(Ok(Some(User {
                         id: UserId(1),
                         login: "user1 (requested by)".to_owned(),
                     })))
@@ -1835,7 +1843,7 @@ mod tests {
             MockRepoAction::GetUser { user_id, result } => {
                 assert_eq!(user_id, UserId(1));
                 result
-                    .send(Ok(Arc::new(User {
+                    .send(Ok(Some(User {
                         id: UserId(1),
                         login: "user1 (requested by)".to_owned(),
                     })))
@@ -1849,7 +1857,7 @@ mod tests {
             MockRepoAction::GetUser { user_id, result } => {
                 assert_eq!(user_id, UserId(1));
                 result
-                    .send(Ok(Arc::new(User {
+                    .send(Ok(Some(User {
                         id: UserId(1),
                         login: "user1 (approved by)".to_owned(),
                     })))
@@ -1942,7 +1950,7 @@ mod tests {
             MockRepoAction::GetUser { user_id, result } => {
                 assert_eq!(user_id, UserId(1));
                 result
-                    .send(Ok(Arc::new(User {
+                    .send(Ok(Some(User {
                         id: UserId(1),
                         login: "user1 (requested by)".to_owned(),
                     })))
@@ -1956,7 +1964,7 @@ mod tests {
             MockRepoAction::GetUser { user_id, result } => {
                 assert_eq!(user_id, UserId(1));
                 result
-                    .send(Ok(Arc::new(User {
+                    .send(Ok(Some(User {
                         id: UserId(1),
                         login: "user1 (approved by)".to_owned(),
                     })))
@@ -2070,7 +2078,7 @@ mod tests {
             MockRepoAction::GetUser { user_id, result } => {
                 assert_eq!(user_id, UserId(1));
                 result
-                    .send(Ok(Arc::new(User {
+                    .send(Ok(Some(User {
                         id: UserId(1),
                         login: "user1 (approved by)".to_owned(),
                     })))
@@ -2084,7 +2092,7 @@ mod tests {
             MockRepoAction::GetUser { user_id, result } => {
                 assert_eq!(user_id, UserId(1));
                 result
-                    .send(Ok(Arc::new(User {
+                    .send(Ok(Some(User {
                         id: UserId(1),
                         login: "user1 (requested by)".to_owned(),
                     })))
@@ -2202,7 +2210,7 @@ mod tests {
             MockRepoAction::GetUser { user_id, result } => {
                 assert_eq!(user_id, UserId(1));
                 result
-                    .send(Ok(Arc::new(User {
+                    .send(Ok(Some(User {
                         id: UserId(1),
                         login: "user1 (requested by)".to_owned(),
                     })))
@@ -2215,7 +2223,7 @@ mod tests {
             MockRepoAction::GetUser { user_id, result } => {
                 assert_eq!(user_id, UserId(1));
                 result
-                    .send(Ok(Arc::new(User {
+                    .send(Ok(Some(User {
                         id: UserId(1),
                         login: "user1 (approved by)".to_owned(),
                     })))

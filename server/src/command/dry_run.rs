@@ -9,6 +9,7 @@ use crate::database::pr::Pr;
 use crate::github::merge_workflow::GitHubMergeWorkflow;
 use crate::github::messages;
 use crate::github::repo::GitHubRepoClient;
+use crate::utils::format_fn;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct DryRunCommand {
@@ -31,7 +32,7 @@ pub async fn handle<R: GitHubRepoClient>(
     }
 
     if let Some(base_sha) = &mut command.base_sha {
-        let Some(base_commit) = context.repo.get_commit_by_sha(base_sha).await.context("get base commit")? else {
+        let Some(base_commit) = context.repo.get_commit(base_sha).await.context("get base commit")? else {
             context
                 .repo
                 .send_message(
@@ -46,7 +47,7 @@ pub async fn handle<R: GitHubRepoClient>(
     }
 
     if let Some(head_sha) = &mut command.head_sha {
-        let Some(head_commit) = context.repo.get_commit_by_sha(head_sha).await.context("get head commit")? else {
+        let Some(head_commit) = context.repo.get_commit(head_sha).await.context("get head commit")? else {
             context
                 .repo
                 .send_message(
@@ -86,7 +87,7 @@ pub async fn handle<R: GitHubRepoClient>(
                 .repo
                 .send_message(
                     context.pr.number,
-                    &messages::error_no_body(messages::format_fn(|f| {
+                    &messages::error_no_body(format_fn(|f| {
                         write!(
                             f,
                             "This PR already has a active merge {}",
@@ -252,7 +253,7 @@ mod tests {
                 &mut conn,
                 BrawlCommandContext {
                     repo: &client,
-                    pr: Arc::new(pr),
+                    pr,
                     user: User {
                         id: UserId(3),
                         login: "test".to_string(),
@@ -341,7 +342,7 @@ mod tests {
                 &mut conn,
                 BrawlCommandContext {
                     repo: &client,
-                    pr: Arc::new(pr),
+                    pr,
                     user: User {
                         id: UserId(3),
                         login: "test".to_string(),
@@ -443,7 +444,7 @@ mod tests {
                 &mut conn,
                 BrawlCommandContext {
                     repo: &client,
-                    pr: Arc::new(pr),
+                    pr,
                     user: User {
                         id: UserId(3),
                         login: "test".to_string(),
@@ -530,7 +531,7 @@ mod tests {
                 &mut conn,
                 BrawlCommandContext {
                     repo: &client,
-                    pr: Arc::new(pr),
+                    pr,
                     user: User {
                         id: UserId(3),
                         login: "test".to_string(),
@@ -561,7 +562,7 @@ mod tests {
         }
 
         match rx.recv().await.unwrap() {
-            MockRepoAction::GetCommitBySha { sha, result } => {
+            MockRepoAction::GetCommit { sha, result } => {
                 assert_eq!(sha, "base");
                 result
                     .send(Ok(Some(Commit {
@@ -574,7 +575,7 @@ mod tests {
         }
 
         match rx.recv().await.unwrap() {
-            MockRepoAction::GetCommitBySha { sha, result } => {
+            MockRepoAction::GetCommit { sha, result } => {
                 assert_eq!(sha, "head");
                 result
                     .send(Ok(Some(Commit {
@@ -629,7 +630,7 @@ mod tests {
                 &mut conn,
                 BrawlCommandContext {
                     repo: &client,
-                    pr: Arc::new(pr),
+                    pr,
                     user: User {
                         id: UserId(3),
                         login: "test".to_string(),
@@ -660,7 +661,7 @@ mod tests {
         }
 
         match rx.recv().await.unwrap() {
-            MockRepoAction::GetCommitBySha { sha, result } => {
+            MockRepoAction::GetCommit { sha, result } => {
                 assert_eq!(sha, "head");
                 result.send(Ok(None)).unwrap();
             }
@@ -718,7 +719,7 @@ mod tests {
                 &mut conn,
                 BrawlCommandContext {
                     repo: &client,
-                    pr: Arc::new(pr),
+                    pr,
                     user: User {
                         id: UserId(3),
                         login: "test".to_string(),
@@ -749,7 +750,7 @@ mod tests {
         }
 
         match rx.recv().await.unwrap() {
-            MockRepoAction::GetCommitBySha { sha, result } => {
+            MockRepoAction::GetCommit { sha, result } => {
                 assert_eq!(sha, "base");
                 result.send(Ok(None)).unwrap();
             }
@@ -800,7 +801,7 @@ mod tests {
                 &mut conn,
                 BrawlCommandContext {
                     repo: &client,
-                    pr: Arc::new(pr),
+                    pr,
                     user: User {
                         id: UserId(3),
                         login: "test".to_string(),
@@ -857,7 +858,7 @@ mod tests {
             &mut conn,
             BrawlCommandContext {
                 repo: &client,
-                pr: Arc::new(pr),
+                pr,
                 user: User {
                     id: UserId(3),
                     login: "test".to_string(),

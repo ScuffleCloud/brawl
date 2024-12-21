@@ -164,21 +164,3 @@ pub fn tests_start(head_sha_link: impl std::fmt::Display, base_sha_link: impl st
 pub fn pong(username: impl std::fmt::Display, status: impl std::fmt::Display) -> IssueMessage {
     IssueMessage::Pong(format!(include_str!("pong.md"), username = username, status = status,))
 }
-
-pub fn format_fn<F>(f: F) -> FormatFn<F>
-where
-    F: Fn(&mut std::fmt::Formatter) -> std::fmt::Result,
-{
-    FormatFn(f)
-}
-
-pub struct FormatFn<F>(F);
-
-impl<F> std::fmt::Display for FormatFn<F>
-where
-    F: Fn(&mut std::fmt::Formatter) -> std::fmt::Result,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        self.0(f)
-    }
-}

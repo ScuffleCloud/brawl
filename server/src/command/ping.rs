@@ -30,8 +30,6 @@ pub async fn handle<R: GitHubRepoClient>(
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::sync::Arc;
-
     use octocrab::models::UserId;
 
     use super::*;
@@ -56,7 +54,7 @@ mod tests {
                     &mut conn,
                     BrawlCommandContext {
                         repo: &client,
-                        pr: Arc::new(PullRequest::default()),
+                        pr: PullRequest::default(),
                         user: User {
                             id: UserId(1),
                             login: "troy".to_string(),
@@ -96,7 +94,7 @@ mod tests {
                 &mut conn,
                 BrawlCommandContext {
                     repo: &client,
-                    pr: Arc::new(PullRequest::default()),
+                    pr: PullRequest::default(),
                     user: User {
                         id: UserId(1),
                         login: "troy".to_string(),

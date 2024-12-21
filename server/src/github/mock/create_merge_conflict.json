@@ -1,0 +1,5 @@
+{
+    "message": "Merge conflict",
+    "documentation_url": "hhttps://docs.github.com/rest/branches/branches#merge-a-branch",
+    "status": "409"
+}

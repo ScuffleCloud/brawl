@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use octocrab::models::pulls::{MergeableState, ReviewState};
-use octocrab::models::{IssueState, UserId};
+use octocrab::models::{IssueState, RepositoryId, UserId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct User {
@@ -11,7 +11,7 @@ pub struct User {
 impl Default for User {
     fn default() -> Self {
         Self {
-            login: "".to_string(),
+            login: "user".to_string(),
             id: UserId(0),
         }
     }
@@ -139,15 +139,6 @@ pub struct Commit {
     pub tree: Option<String>,
 }
 
-impl From<octocrab::models::repos::RepoCommit> for Commit {
-    fn from(value: octocrab::models::repos::RepoCommit) -> Self {
-        Self {
-            sha: value.sha,
-            tree: None,
-        }
-    }
-}
-
 impl From<octocrab::models::commits::Commit> for Commit {
     fn from(value: octocrab::models::commits::Commit) -> Self {
         Self {
@@ -203,4 +194,31 @@ pub struct CheckRunEvent {
     pub completed_at: Option<DateTime<Utc>>,
     pub status: CheckRunStatus,
     pub conclusion: Option<CheckRunConclusion>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Repository {
+    pub id: RepositoryId,
+    pub name: String,
+    pub owner: User,
+}
+
+impl From<octocrab::models::Repository> for Repository {
+    fn from(value: octocrab::models::Repository) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+            owner: value.owner.expect("repository has no owner").into(),
+        }
+    }
+}
+
+impl Default for Repository {
+    fn default() -> Self {
+        Self {
+            id: RepositoryId(0),
+            name: "repo".to_string(),
+            owner: User::default(),
+        }
+    }
 }

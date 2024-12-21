@@ -22,17 +22,15 @@ use sha2::Sha256;
 pub mod check_event;
 
 use crate::command::{BrawlCommand, BrawlCommandContext, PullRequestCommand};
-use crate::github::installation::GitHubInstallationClient;
+use crate::github::installation::InstallationClient;
 use crate::github::repo::GitHubRepoClient;
 
 pub trait WebhookConfig: Send + Sync + 'static {
-    type InstallationClient: GitHubInstallationClient;
-
     fn webhook_secret(&self) -> &str;
 
     fn bind_address(&self) -> Option<SocketAddr>;
 
-    fn installation_client(&self, installation_id: InstallationId) -> Option<Self::InstallationClient>;
+    fn installation_client(&self, installation_id: InstallationId) -> Option<Arc<InstallationClient>>;
 
     fn update_installation(
         &self,
@@ -285,7 +283,7 @@ async fn handle_event<C: WebhookConfig>(global: Arc<C>, mut event: WebhookEvent)
         }
         WebhookEventPayload::Repository(_) => {
             if let Some(repo) = event.repository {
-                client.set_repository(repo).await.context("set repository")?;
+                client.fetch_repository(repo.id).await.context("fetch_repository")?;
             }
         }
         WebhookEventPayload::PullRequest(mut pull_request_event) => {
@@ -309,13 +307,9 @@ async fn handle_event<C: WebhookConfig>(global: Arc<C>, mut event: WebhookEvent)
                 return Ok(());
             };
 
-            let Some(repo_client) = client.get_repository(repo_id).await? else {
+            let Some(repo_client) = client.get_repo_client(repo_id) else {
                 return Ok(());
             };
-
-            repo_client
-                .set_pull_request(pull_request_event.pull_request.clone().into())
-                .await;
 
             let pr = repo_client
                 .get_pull_request(pull_request_event.pull_request.number)
@@ -334,7 +328,7 @@ async fn handle_event<C: WebhookConfig>(global: Arc<C>, mut event: WebhookEvent)
                 .handle(
                     global.database().await?.deref_mut(),
                     BrawlCommandContext {
-                        repo: &repo_client,
+                        repo: repo_client.as_ref(),
                         user: author.into(),
                         pr,
                     },
@@ -357,7 +351,7 @@ async fn handle_event<C: WebhookConfig>(global: Arc<C>, mut event: WebhookEvent)
                 return Ok(());
             };
 
-            let Some(repo_client) = client.get_repository(repo.id).await? else {
+            let Some(repo_client) = client.get_repo_client(repo.id) else {
                 return Ok(());
             };
 
@@ -367,7 +361,7 @@ async fn handle_event<C: WebhookConfig>(global: Arc<C>, mut event: WebhookEvent)
                 .handle(
                     global.database().await?.deref_mut(),
                     BrawlCommandContext {
-                        repo: &repo_client,
+                        repo: repo_client.as_ref(),
                         user: issue_comment_event.comment.user.into(),
                         pr,
                     },
@@ -376,13 +370,17 @@ async fn handle_event<C: WebhookConfig>(global: Arc<C>, mut event: WebhookEvent)
         }
         WebhookEventPayload::CheckRun(check_run_event) => {
             let repo = event.repository.context("missing repository")?;
-            let Some(repo_client) = client.get_repository(repo.id).await? else {
+            let Some(repo_client) = client.get_repo_client(repo.id) else {
                 return Ok(());
             };
 
-            check_event::handle(&repo_client, global.database().await?.deref_mut(), check_run_event.check_run)
-                .await
-                .context("handle_check_event")?;
+            check_event::handle(
+                repo_client.as_ref(),
+                global.database().await?.deref_mut(),
+                check_run_event.check_run,
+            )
+            .await
+            .context("handle_check_event")?;
         }
         _ => {}
     }

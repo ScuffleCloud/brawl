@@ -143,7 +143,7 @@ pub mod tests {
                     &mut conn,
                     BrawlCommandContext {
                         repo: &client,
-                        pr: Arc::new(pr),
+                        pr,
                         user: User {
                             id: UserId(1),
                             login: "test".to_string(),
@@ -239,10 +239,7 @@ pub mod tests {
                 &mut conn,
                 BrawlCommandContext {
                     repo: &client,
-                    pr: Arc::new(PullRequest {
-                        number: 2,
-                        ..Default::default()
-                    }),
+                    pr,
                     user: User {
                         id: UserId(2),
                         login: "test".to_string(),
@@ -338,7 +335,7 @@ pub mod tests {
                 &mut conn,
                 BrawlCommandContext {
                     repo: &client,
-                    pr: Arc::new(pr),
+                    pr,
                     user: User {
                         id: UserId(3),
                         login: "test".to_string(),
@@ -389,7 +386,7 @@ pub mod tests {
             &mut conn,
             BrawlCommandContext {
                 repo: &client,
-                pr: Arc::new(pr),
+                pr,
                 user: User {
                     id: UserId(4),
                     login: "test".to_string(),

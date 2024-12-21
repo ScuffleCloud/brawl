@@ -154,7 +154,7 @@ mod tests {
                     &mut conn,
                     BrawlCommandContext {
                         repo: &client,
-                        pr: Arc::new(PullRequest {
+                        pr: PullRequest {
                             number: 1,
                             head: PrBranch {
                                 sha: "head_sha".to_string(),
@@ -177,7 +177,7 @@ mod tests {
                                 },
                             ],
                             ..Default::default()
-                        }),
+                        },
                         user: User::default(),
                     },
                 )
@@ -319,7 +319,7 @@ mod tests {
                 &mut conn,
                 BrawlCommandContext {
                     repo: &client,
-                    pr: Arc::new(PullRequest::default()),
+                    pr: PullRequest::default(),
                     user: User::default(),
                 },
                 MergeCommand { priority: Some(100) },
@@ -367,10 +367,10 @@ mod tests {
             &mut conn,
             BrawlCommandContext {
                 repo: &client,
-                pr: Arc::new(PullRequest {
+                pr: PullRequest {
                     merged_at: Some(Utc::now()),
                     ..Default::default()
-                }),
+                },
                 user: User::default(),
             },
             MergeCommand { priority: Some(100) },
@@ -394,7 +394,7 @@ mod tests {
                 &mut conn,
                 BrawlCommandContext {
                     repo: &client,
-                    pr: Arc::new(PullRequest::default()),
+                    pr: PullRequest::default(),
                     user: User::default(),
                 },
                 MergeCommand { priority: Some(100) },
@@ -430,7 +430,7 @@ mod tests {
             &mut conn,
             BrawlCommandContext {
                 repo: &client,
-                pr: Arc::new(PullRequest::default()),
+                pr: PullRequest::default(),
                 user: User::default(),
             },
             MergeCommand { priority: Some(100) },

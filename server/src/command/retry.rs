@@ -153,10 +153,10 @@ mod tests {
                         id: UserId(1),
                         login: "test".into(),
                     },
-                    pr: Arc::new(PullRequest {
+                    pr: PullRequest {
                         number: 1,
                         ..Default::default()
-                    }),
+                    },
                 },
             )
             .await
@@ -229,10 +229,10 @@ mod tests {
                         id: UserId(1),
                         login: "test".into(),
                     },
-                    pr: Arc::new(PullRequest {
+                    pr: PullRequest {
                         number: 1,
                         ..Default::default()
-                    }),
+                    },
                 },
             )
             .await
@@ -321,10 +321,10 @@ mod tests {
                             id: UserId(1),
                             login: "test".into(),
                         },
-                        pr: Arc::new(PullRequest {
+                        pr: PullRequest {
                             number: 1,
                             ..Default::default()
-                        }),
+                        },
                     },
                 ),
             )
@@ -429,10 +429,10 @@ mod tests {
                             id: UserId(1),
                             login: "test".into(),
                         },
-                        pr: Arc::new(PullRequest {
+                        pr: PullRequest {
                             number: 1,
                             ..Default::default()
-                        }),
+                        },
                     },
                 ),
             )
@@ -537,10 +537,10 @@ mod tests {
                             id: UserId(1),
                             login: "test".into(),
                         },
-                        pr: Arc::new(PullRequest {
+                        pr: PullRequest {
                             number: 1,
                             ..Default::default()
-                        }),
+                        },
                     },
                 ),
             )
@@ -604,10 +604,10 @@ mod tests {
                         id: UserId(1),
                         login: "test".into(),
                     },
-                    pr: Arc::new(PullRequest {
+                    pr: PullRequest {
                         number: 1,
                         ..Default::default()
-                    }),
+                    },
                 },
             )
             .await

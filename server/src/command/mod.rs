@@ -1,5 +1,4 @@
 use std::str::FromStr;
-use std::sync::Arc;
 
 use diesel_async::AsyncPgConnection;
 use dry_run::DryRunCommand;
@@ -30,7 +29,7 @@ pub enum BrawlCommand {
 pub struct BrawlCommandContext<'a, R> {
     pub repo: &'a R,
     pub user: User,
-    pub pr: Arc<PullRequest>,
+    pub pr: PullRequest,
 }
 
 impl BrawlCommand {
