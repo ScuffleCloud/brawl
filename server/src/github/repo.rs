@@ -870,7 +870,7 @@ mod tests {
             repo_client
         });
 
-        type MockReq =(Box<dyn Fn(DebugReq)>, &'static [u8]);
+        type MockReq = (Box<dyn Fn(DebugReq)>, &'static [u8]);
 
         let cases: &[MockReq] = &[
             (
@@ -1364,7 +1364,7 @@ mod tests {
                     insta::assert_debug_snapshot!(req, @r#"
                     DebugReq {
                         method: GET,
-                        uri: "/orgs/ScuffleCloud/teams/team1/members?per_page=100",
+                        uri: "/orgs/scufflecloud/teams/team1/members?per_page=100",
                         headers: [
                             (
                                 "content-length",
@@ -1387,7 +1387,7 @@ mod tests {
                     insta::assert_debug_snapshot!(req, @r#"
                     DebugReq {
                         method: GET,
-                        uri: "/users/TroyKomodo",
+                        uri: "/users/troykomodo",
                         headers: [
                             (
                                 "content-length",
@@ -1410,7 +1410,7 @@ mod tests {
                     insta::assert_debug_snapshot!(req, @r#"
                     DebugReq {
                         method: GET,
-                        uri: "/orgs/ScuffleCloud/teams/not-exist/members?per_page=100",
+                        uri: "/orgs/scufflecloud/teams/not-exist/members?per_page=100",
                         headers: [
                             (
                                 "content-length",

@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use octocrab::models::pulls::{MergeableState, ReviewState};
-use octocrab::models::{IssueState, RepositoryId, UserId};
+use octocrab::models::{InstallationId, IssueState, RepositoryId, UserId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct User {
@@ -219,6 +219,30 @@ impl Default for Repository {
             id: RepositoryId(0),
             name: "repo".to_string(),
             owner: User::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Installation {
+    pub id: InstallationId,
+    pub account: User,
+}
+
+impl Default for Installation {
+    fn default() -> Self {
+        Self {
+            id: InstallationId(0),
+            account: User::default(),
+        }
+    }
+}
+
+impl From<octocrab::models::Installation> for Installation {
+    fn from(value: octocrab::models::Installation) -> Self {
+        Self {
+            id: value.id,
+            account: value.account.into(),
         }
     }
 }

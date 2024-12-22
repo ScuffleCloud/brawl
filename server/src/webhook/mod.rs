@@ -5,24 +5,25 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use axum::extract::State;
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::StatusCode;
 use axum::{Json, RequestExt};
 use diesel_async::AsyncPgConnection;
-use hmac::{Hmac, Mac};
 use octocrab::models::webhook_events::payload::{
     InstallationWebhookEventAction, IssueCommentWebhookEventAction, PullRequestWebhookEventAction,
 };
-use octocrab::models::webhook_events::{EventInstallation, WebhookEventPayload, WebhookEventType};
-use octocrab::models::{Installation, InstallationId};
+use octocrab::models::webhook_events::WebhookEventPayload;
+use octocrab::models::{InstallationId, RepositoryId};
+use parse::{parse_from_request, WebhookEvent};
 use scuffle_context::ContextFutExt;
 use scuffle_http::backend::HttpServer;
 use serde::Serialize;
-use sha2::Sha256;
 
-pub mod check_event;
+mod check_event;
+mod parse;
 
 use crate::command::{BrawlCommand, BrawlCommandContext, PullRequestCommand};
 use crate::github::installation::InstallationClient;
+use crate::github::models::{Installation, User};
 use crate::github::repo::GitHubRepoClient;
 
 pub trait WebhookConfig: Send + Sync + 'static {
@@ -48,7 +49,7 @@ pub trait WebhookConfig: Send + Sync + 'static {
 
 fn router<C: WebhookConfig>(global: Arc<C>) -> axum::Router {
     axum::Router::new()
-        .route("/github/webhook", axum::routing::post(handle_webhook::<C>))
+        .route("/github/webhook", axum::routing::post(handle::<C>))
         .with_state(global)
 }
 
@@ -58,69 +59,19 @@ struct Response {
     message: String,
 }
 
-fn verify_gh_signature(headers: &HeaderMap<HeaderValue>, body: &[u8], secret: &str) -> bool {
-    let Some(signature) = headers.get("x-hub-signature-256").map(|v| v.as_bytes()) else {
-        return false;
-    };
-    let Some(signature) = signature.get(b"sha256=".len()..).and_then(|v| hex::decode(v).ok()) else {
-        return false;
-    };
-
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("Cannot create HMAC key");
-    mac.update(body);
-    mac.verify_slice(&signature).is_ok()
-}
-
-async fn handle_webhook<C: WebhookConfig>(
+async fn handle<C: WebhookConfig>(
     State(global): State<Arc<C>>,
     request: axum::http::Request<axum::body::Body>,
 ) -> (StatusCode, Json<Response>) {
-    let (parts, body) = request.with_limited_body().into_parts();
-    let Some(header) = parts.headers.get("X-GitHub-Event").and_then(|v| v.to_str().ok()) else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(Response {
-                success: false,
-                message: "Missing X-GitHub-Event header".to_string(),
-            }),
-        );
-    };
-
-    let Ok(body) = axum::body::to_bytes(body, 1024 * 1024 * 10).await else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(Response {
-                success: false,
-                message: "Failed to read body".to_string(),
-            }),
-        );
-    };
-
-    if !verify_gh_signature(&parts.headers, &body, global.webhook_secret()) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(Response {
-                success: false,
-                message: "Invalid signature".to_string(),
-            }),
-        );
-    }
-
-    let event = match parse_event(header, &body) {
+    let event = match parse_from_request(request.with_limited_body(), global.webhook_secret()).await {
         Ok(event) => event,
-        Err(e) => {
-            tracing::error!("Failed to parse event: {:#}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(Response {
-                    success: false,
-                    message: "Failed to parse event".to_string(),
-                }),
-            );
+        Err((status, message)) => {
+            tracing::debug!("Failed to parse event ({}): {}", status.as_u16(), message);
+            return (status, Json(Response { success: false, message }));
         }
     };
 
-    if let Err(err) = handle_event(global, event).await {
+    if let Err(err) = handle_webhook(global.as_ref(), event).await {
         tracing::error!("Failed to handle event: {:#}", err);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -138,70 +89,6 @@ async fn handle_webhook<C: WebhookConfig>(
             message: "Event handled successfully".to_string(),
         }),
     )
-}
-
-#[derive(Debug, Clone)]
-pub struct WebhookEvent {
-    pub sender: Option<octocrab::models::Author>,
-    pub repository: Option<octocrab::models::Repository>,
-    pub organization: Option<octocrab::models::orgs::Organization>,
-    pub installation: Option<octocrab::models::webhook_events::EventInstallation>,
-    pub kind: WebhookEventType,
-    pub specific: WebhookEventPayload,
-}
-
-fn parse_event(header: &str, body: &[u8]) -> anyhow::Result<WebhookEvent> {
-    // NOTE: this is inefficient code to simply reuse the code from "derived"
-    // serde::Deserialize instead of writing specific deserialization code for the
-    // enum.
-    let kind = if header.starts_with('"') {
-        serde_json::from_str::<WebhookEventType>(header)?
-    } else {
-        serde_json::from_str::<WebhookEventType>(&format!("\"{header}\""))?
-    };
-
-    // Intermediate structure allows to separate the common fields from
-    // the event specific one.
-    #[derive(serde::Deserialize)]
-    struct Intermediate {
-        sender: Option<octocrab::models::Author>,
-        repository: Option<octocrab::models::Repository>,
-        organization: Option<octocrab::models::orgs::Organization>,
-        installation: Option<octocrab::models::webhook_events::EventInstallation>,
-        #[serde(flatten)]
-        specific: serde_json::Value,
-    }
-
-    let Intermediate {
-        sender,
-        repository,
-        organization,
-        installation,
-        mut specific,
-    } = serde_json::from_slice::<Intermediate>(body)?;
-
-    // Bug: OctoCrab wrongly requires the pusher to have an email
-    // Remove when https://github.com/XAMPPRocky/octocrab/issues/486 is fixed
-    if kind == WebhookEventType::Push {
-        if let Some(pusher) = specific.get_mut("pusher") {
-            if let Some(email) = pusher.get_mut("email") {
-                if email.is_null() {
-                    *email = serde_json::Value::String("".to_owned())
-                }
-            }
-        }
-    }
-
-    let specific = kind.parse_specific_payload(specific)?;
-
-    Ok(WebhookEvent {
-        sender,
-        repository,
-        organization,
-        installation,
-        kind,
-        specific,
-    })
 }
 
 pub struct WebhookSvc;
@@ -241,49 +128,75 @@ where
     }
 }
 
-async fn handle_event<C: WebhookConfig>(global: Arc<C>, mut event: WebhookEvent) -> anyhow::Result<()> {
-    let installation_id = match &event.installation {
-        Some(EventInstallation::Full(installation)) => {
-            let installation_id = installation.id;
+enum WebhookEventAction {
+    Command {
+        installation_id: InstallationId,
+        command: BrawlCommand,
+        repo_id: RepositoryId,
+        pr_number: u64,
+        user: User,
+    },
+    CheckRun {
+        installation_id: InstallationId,
+        repo_id: RepositoryId,
+        check_run: serde_json::Value,
+    },
+    DeleteInstallation {
+        installation_id: InstallationId,
+    },
+    AddRepository {
+        installation_id: InstallationId,
+        repo_id: RepositoryId,
+    },
+    RemoveRepository {
+        installation_id: InstallationId,
+        repo_id: RepositoryId,
+    },
+    UpdateInstallation {
+        installation: Installation,
+    },
+}
 
-            global
-                .update_installation(*installation.clone())
-                .await
-                .context("update_installation")?;
+async fn parse_webhook(mut event: WebhookEvent) -> anyhow::Result<Vec<WebhookEventAction>> {
+    let mut actions = vec![];
 
-            installation_id
-        }
-        Some(EventInstallation::Minimal(installation)) => installation.id,
-        None => {
-            tracing::warn!("event does not have installation: {:?}", event.kind);
-            return Ok(());
-        }
-    };
+    if let Some(installation) = event.installation {
+        actions.push(WebhookEventAction::UpdateInstallation { installation });
+    }
 
-    let Some(client) = global.installation_client(installation_id) else {
-        tracing::error!("no client for installation {}", installation_id);
-        return Ok(());
+    let Some(installation_id) = event.installtion_id else {
+        tracing::warn!("event does not have an installation id: {:?}", event.kind);
+        return Ok(actions);
     };
 
     match event.specific {
         WebhookEventPayload::Installation(install_event) => match install_event.action {
             InstallationWebhookEventAction::Deleted | InstallationWebhookEventAction::Suspend => {
-                global.delete_installation(installation_id).context("delete_installation")?;
+                actions.push(WebhookEventAction::DeleteInstallation { installation_id });
             }
             _ => {}
         },
         WebhookEventPayload::InstallationRepositories(event) => {
             for repo in event.repositories_added {
-                client.fetch_repository(repo.id).await.context("fetch_repository")?;
+                actions.push(WebhookEventAction::AddRepository {
+                    installation_id,
+                    repo_id: repo.id,
+                });
             }
 
             for repo in event.repositories_removed {
-                client.remove_repository(repo.id);
+                actions.push(WebhookEventAction::RemoveRepository {
+                    installation_id,
+                    repo_id: repo.id,
+                });
             }
         }
         WebhookEventPayload::Repository(_) => {
             if let Some(repo) = event.repository {
-                client.fetch_repository(repo.id).await.context("fetch_repository")?;
+                actions.push(WebhookEventAction::AddRepository {
+                    installation_id,
+                    repo_id: repo.id,
+                });
             }
         }
         WebhookEventPayload::PullRequest(mut pull_request_event) => {
@@ -295,95 +208,167 @@ async fn handle_event<C: WebhookConfig>(global: Arc<C>, mut event: WebhookEvent)
                     BrawlCommand::PullRequest(PullRequestCommand::ReadyForReview)
                 }
                 PullRequestWebhookEventAction::Closed => BrawlCommand::PullRequest(PullRequestCommand::Closed),
-                _ => return Ok(()),
+                _ => return Ok(actions),
             };
 
-            let Some(repo_id) = event
-                .repository
-                .as_ref()
-                .or(pull_request_event.pull_request.repo.as_deref())
-                .map(|r| r.id)
+            let Some(repo_id) = event.repository.as_ref().map(|r| r.id).or(pull_request_event
+                .pull_request
+                .repo
+                .as_deref()
+                .map(|r| r.id))
             else {
-                return Ok(());
+                return Ok(actions);
             };
 
-            let Some(repo_client) = client.get_repo_client(repo_id) else {
-                return Ok(());
-            };
-
-            let pr = repo_client
-                .get_pull_request(pull_request_event.pull_request.number)
-                .await
-                .context("get_pull_request")?;
-
-            let Some(author) = event
+            let Some(user) = event
                 .sender
                 .take()
-                .or_else(|| pull_request_event.pull_request.user.take().map(|u| *u))
+                .or_else(|| pull_request_event.pull_request.user.take().map(|u| (*u).into()))
             else {
-                return Ok(());
+                return Ok(actions);
             };
 
-            command
-                .handle(
-                    global.database().await?.deref_mut(),
-                    BrawlCommandContext {
-                        repo: repo_client.as_ref(),
-                        user: author.into(),
-                        pr,
-                    },
-                )
-                .await?;
+            actions.push(WebhookEventAction::Command {
+                installation_id,
+                command,
+                repo_id,
+                pr_number: pull_request_event.pull_request.number,
+                user,
+            });
         }
         WebhookEventPayload::IssueComment(issue_comment_event)
             if issue_comment_event.action == IssueCommentWebhookEventAction::Created
                 && issue_comment_event.issue.pull_request.is_some() =>
         {
             let Some(body) = issue_comment_event.comment.body.as_ref() else {
-                return Ok(());
+                return Ok(actions);
             };
 
             let Ok(command) = BrawlCommand::from_str(body) else {
-                return Ok(());
+                return Ok(actions);
             };
 
             let Some(repo) = event.repository else {
-                return Ok(());
+                return Ok(actions);
             };
 
-            let Some(repo_client) = client.get_repo_client(repo.id) else {
-                return Ok(());
+            actions.push(WebhookEventAction::Command {
+                installation_id,
+                command,
+                repo_id: repo.id,
+                pr_number: issue_comment_event.issue.number,
+                user: issue_comment_event.comment.user.into(),
+            });
+        }
+        WebhookEventPayload::CheckRun(check_run_event) => {
+            let repo = event.repository.context("missing repository")?;
+
+            actions.push(WebhookEventAction::CheckRun {
+                installation_id,
+                repo_id: repo.id,
+                check_run: check_run_event.check_run,
+            });
+        }
+        _ => {}
+    }
+
+    Ok(actions)
+}
+
+async fn handle_webhook_action(global: &impl WebhookConfig, action: WebhookEventAction) -> anyhow::Result<()> {
+    match action {
+        WebhookEventAction::Command {
+            command,
+            installation_id,
+            pr_number,
+            repo_id,
+            user,
+        } => {
+            let Some(installation_client) = global.installation_client(installation_id) else {
+                return Err(anyhow::anyhow!("installation client not found"));
             };
 
-            let pr = repo_client.get_pull_request(issue_comment_event.issue.number).await?;
+            let Some(repo_client) = installation_client.get_repo_client(repo_id) else {
+                return Err(anyhow::anyhow!("repo client not found"));
+            };
+
+            let pr = repo_client.get_pull_request(pr_number).await?;
 
             command
                 .handle(
                     global.database().await?.deref_mut(),
                     BrawlCommandContext {
                         repo: repo_client.as_ref(),
-                        user: issue_comment_event.comment.user.into(),
+                        user,
                         pr,
                     },
                 )
                 .await?;
+
+            Ok(())
         }
-        WebhookEventPayload::CheckRun(check_run_event) => {
-            let repo = event.repository.context("missing repository")?;
-            let Some(repo_client) = client.get_repo_client(repo.id) else {
-                return Ok(());
+        WebhookEventAction::CheckRun {
+            check_run,
+            installation_id,
+            repo_id,
+        } => {
+            let Some(installation_client) = global.installation_client(installation_id) else {
+                return Err(anyhow::anyhow!("installation client not found"));
             };
 
-            check_event::handle(
-                repo_client.as_ref(),
-                global.database().await?.deref_mut(),
-                check_run_event.check_run,
-            )
-            .await
-            .context("handle_check_event")?;
+            let Some(repo_client) = installation_client.get_repo_client(repo_id) else {
+                return Err(anyhow::anyhow!("repo client not found"));
+            };
+
+            check_event::handle(repo_client.as_ref(), global.database().await?.deref_mut(), check_run).await?;
+
+            Ok(())
         }
-        _ => {}
+        WebhookEventAction::DeleteInstallation { installation_id } => {
+            global.delete_installation(installation_id)?;
+            Ok(())
+        }
+        WebhookEventAction::AddRepository {
+            installation_id,
+            repo_id,
+        } => {
+            let Some(installation_client) = global.installation_client(installation_id) else {
+                return Err(anyhow::anyhow!("installation client not found"));
+            };
+
+            installation_client.fetch_repository(repo_id).await?;
+            Ok(())
+        }
+        WebhookEventAction::RemoveRepository {
+            installation_id,
+            repo_id,
+        } => {
+            let Some(installation_client) = global.installation_client(installation_id) else {
+                return Err(anyhow::anyhow!("installation client not found"));
+            };
+
+            installation_client.remove_repository(repo_id);
+            Ok(())
+        }
+        WebhookEventAction::UpdateInstallation { installation } => {
+            global.update_installation(installation).await?;
+            Ok(())
+        }
+    }
+}
+
+async fn handle_webhook(global: &impl WebhookConfig, event: WebhookEvent) -> anyhow::Result<()> {
+    let actions = parse_webhook(event).await?;
+
+    for action in actions {
+        handle_webhook_action(global, action).await?;
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    // use super::*;
 }

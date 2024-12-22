@@ -7,13 +7,13 @@ use anyhow::Context;
 use axum::http;
 use futures::TryStreamExt;
 use moka::future::Cache;
-use octocrab::models::{Installation, InstallationRepositories, RepositoryId, UserId};
+use octocrab::models::{InstallationRepositories, RepositoryId, UserId};
 use octocrab::{GitHubError, Octocrab};
 use parking_lot::Mutex;
 
 use super::config::GitHubBrawlRepoConfig;
 use super::merge_workflow::DefaultMergeWorkflow;
-use super::models::{Repository, User};
+use super::models::{Installation, Repository, User};
 use super::repo::RepoClient;
 
 pub struct InstallationClient {
@@ -39,7 +39,7 @@ pub enum GitHubBrawlRepoConfigError {
 pub struct UserCache {
     users: Cache<UserId, Option<User>>,
     users_by_name: Cache<String, Option<UserId>>,
-    teams: Cache<String, Vec<UserId>>,
+    teams: Cache<(String, String), Vec<UserId>>,
 }
 
 impl Default for UserCache {
@@ -59,13 +59,13 @@ impl UserCache {
 }
 
 impl InstallationClient {
-    pub async fn new(client: Octocrab, installation: Installation) -> anyhow::Result<Self> {
-        Ok(Self {
+    pub fn new(client: Octocrab, installation: Installation) -> Self {
+        Self {
             client,
             installation: Mutex::new(installation),
             repositories: Mutex::new(HashMap::new()),
             user_cache: UserCache::default(),
-        })
+        }
     }
 
     async fn get_repo_config(&self, repo_id: RepositoryId) -> Result<GitHubBrawlRepoConfig, GitHubBrawlRepoConfigError> {
@@ -227,9 +227,10 @@ impl UserCache {
     }
 
     pub async fn get_user_by_name(&self, client: &Octocrab, name: &str) -> anyhow::Result<Option<User>> {
+        let name = name.trim_start_matches('@').to_lowercase();
         let user_id = self
             .users_by_name
-            .try_get_with::<_, octocrab::Error>(name.trim_start_matches('@').to_lowercase(), async {
+            .try_get_with::<_, octocrab::Error>(name.clone(), async {
                 let user = match client.users(name).profile().await {
                     Ok(user) => user,
                     Err(octocrab::Error::GitHub {
@@ -257,9 +258,11 @@ impl UserCache {
     }
 
     pub async fn get_team_users(&self, client: &Octocrab, owner: &str, team: &str) -> anyhow::Result<Vec<UserId>> {
+        let team = team.to_lowercase();
+        let owner = owner.to_lowercase();
         self.teams
-            .try_get_with_by_ref::<_, octocrab::Error, _>(team, async {
-                let team = match client.teams(owner).members(team).per_page(100).send().await {
+            .try_get_with_by_ref::<_, octocrab::Error, _>(&(owner.clone(), team.clone()), async {
+                let team = match client.teams(&owner).members(&team).per_page(100).send().await {
                     Ok(team) => team,
                     Err(octocrab::Error::GitHub {
                         source:
@@ -280,5 +283,470 @@ impl UserCache {
             })
             .await
             .context("get team users")
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use http::StatusCode;
+    use octocrab::models::InstallationId;
+
+    use super::*;
+    use crate::github::test_utils::{debug_req, mock_octocrab, mock_response};
+
+    fn mock_installation() -> Installation {
+        Installation {
+            id: InstallationId(1),
+            account: User {
+                id: UserId(1),
+                login: "test".to_string(),
+            },
+        }
+    }
+
+    fn mock_installation_client(client: Octocrab) -> Arc<InstallationClient> {
+        let installation = mock_installation();
+        Arc::new(InstallationClient::new(client, installation))
+    }
+
+    #[tokio::test]
+    async fn test_get_repo_config() {
+        let (client, mut handle) = mock_octocrab();
+        let installation_client = mock_installation_client(client);
+
+        let task = tokio::spawn(async move {
+            assert!(installation_client.get_repo_config(RepositoryId(1)).await.unwrap().enabled);
+            assert!(!installation_client.get_repo_config(RepositoryId(2)).await.unwrap().enabled);
+        });
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/repositories/1/contents/.github/brawl.toml?",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_config.json")));
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/repositories/2/contents/.github/brawl.toml?",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(
+            StatusCode::NOT_FOUND,
+            include_bytes!("mock/get_config_not_found.json"),
+        ));
+
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_set_repository() {
+        let (client, mut handle) = mock_octocrab();
+        let installation_client = mock_installation_client(client);
+
+        let task = tokio::spawn(async move {
+            installation_client.set_repository(Repository::default()).await.unwrap();
+            installation_client.set_repository(Repository::default()).await.unwrap();
+            installation_client
+        });
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/repositories/0/contents/.github/brawl.toml?",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_config.json")));
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/repositories/0/contents/.github/brawl.toml?",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_config.json")));
+
+        let installation_client = task.await.unwrap();
+        assert!(installation_client.has_repository(RepositoryId(0)));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_repositories() {
+        let (client, mut handle) = mock_octocrab();
+        let installation_client = mock_installation_client(client);
+
+        let task = tokio::spawn(async move {
+            installation_client.fetch_repositories().await.unwrap();
+            installation_client
+        });
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/installation/repositories?per_page=100&page=1",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(
+            StatusCode::OK,
+            include_bytes!("mock/get_installation_repos.json"),
+        ));
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/repositories/1296269/contents/.github/brawl.toml?",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_config.json")));
+
+        let installation_client = task.await.unwrap();
+        assert_eq!(installation_client.repositories(), vec![RepositoryId(1296269)]);
+        assert!(installation_client.get_repo_client(RepositoryId(1296269)).is_some());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_repository() {
+        let (client, mut handle) = mock_octocrab();
+        let installation_client = mock_installation_client(client);
+
+        let task = tokio::spawn(async move {
+            installation_client.fetch_repository(RepositoryId(899726767)).await.unwrap();
+            installation_client
+        });
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/repositories/899726767",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_repo.json")));
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/repositories/899726767/contents/.github/brawl.toml?",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_config.json")));
+
+        let installation_client = task.await.unwrap();
+        assert!(installation_client.has_repository(RepositoryId(899726767)));
+        assert!(installation_client.get_repo_client(RepositoryId(899726767)).is_some());
+    }
+
+    #[tokio::test]
+    async fn test_installation() {
+        let (client, _) = mock_octocrab();
+        let installation_client = mock_installation_client(client);
+
+        assert_eq!(installation_client.installation().id, InstallationId(1));
+        assert_eq!(installation_client.owner(), "test");
+
+        installation_client.update_installation(Installation {
+            id: InstallationId(2),
+            account: User {
+                id: UserId(2),
+                login: "test2".to_string(),
+            },
+        });
+
+        assert_eq!(installation_client.installation().id, InstallationId(2));
+        assert_eq!(installation_client.owner(), "test2");
+    }
+
+    #[tokio::test]
+    async fn test_remove_repository() {
+        let (client, mut handle) = mock_octocrab();
+        let installation_client = mock_installation_client(client);
+
+        let task = tokio::spawn(async move {
+            installation_client.set_repository(Repository::default()).await.unwrap();
+            installation_client
+        });
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/repositories/0/contents/.github/brawl.toml?",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_config.json")));
+
+        let installation_client = task.await.unwrap();
+        assert!(installation_client.has_repository(RepositoryId(0)));
+
+        installation_client.remove_repository(RepositoryId(0));
+        assert!(!installation_client.has_repository(RepositoryId(0)));
+    }
+
+    #[tokio::test]
+    async fn test_user_cache() {
+        let (client, mut handle) = mock_octocrab();
+        let cache = UserCache::new(std::time::Duration::from_millis(100), 100);
+
+        let task = tokio::spawn(async move {
+            cache.get_user(&client, UserId(49777269)).await.unwrap(); // cache miss
+            cache.get_user_by_name(&client, "troykomodo").await.unwrap(); // cache hit (hit from get_user)
+            cache.get_team_users(&client, "test", "team").await.unwrap(); // cache miss
+            cache.get_user(&client, UserId(49777269)).await.unwrap(); // cache hit (hit from get_user)
+            cache.get_user_by_name(&client, "troykomodo2").await.unwrap(); // cache miss
+            cache.get_team_users(&client, "test", "team").await.unwrap(); // cache hit (hit from get_team_users)
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await; // sleep to expire cache
+            cache.get_user(&client, UserId(49777269)).await.unwrap(); // cache miss (expired)
+            cache.get_user_by_name(&client, "troykomodo2").await.unwrap(); // cache miss (expired)
+            cache.get_team_users(&client, "test", "team").await.unwrap(); // cache miss (expired)
+            cache.get_user(&client, UserId(49777269)).await.unwrap(); // cache hit (re-fetched)
+            cache.get_user_by_name(&client, "troykomodo2").await.unwrap(); // cache hit (re-fetched)
+            cache.get_team_users(&client, "test", "team").await.unwrap(); // cache hit (re-fetched)
+        });
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/user/49777269",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/user.json")));
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/orgs/test/teams/team/members?per_page=100",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/team_members.json")));
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/users/troykomodo2",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/user.json")));
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/user/49777269",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/user.json")));
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/users/troykomodo2",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/user.json")));
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/orgs/test/teams/team/members?per_page=100",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/team_members.json")));
+
+        task.await.unwrap();
     }
 }

@@ -162,7 +162,7 @@ pub struct InsertCiRun<'a> {
     pub is_dry_run: bool,
 }
 
-#[derive(Queryable, Selectable, Debug)]
+#[derive(Queryable, Selectable, Debug, Clone)]
 #[diesel(table_name = super::schema::github_ci_runs)]
 pub struct CiRun<'a> {
     pub id: i32,

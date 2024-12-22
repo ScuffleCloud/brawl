@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use installation::InstallationClient;
-use octocrab::models::{AppId, Installation, InstallationId, RepositoryId, UserId};
+use models::Installation;
+use octocrab::models::{AppId, InstallationId, RepositoryId, UserId};
 use octocrab::Octocrab;
 
 pub mod config;
@@ -19,28 +20,39 @@ pub struct GitHubService {
 }
 
 impl GitHubService {
+    /// Create a new GitHubService with a new Octocrab client
     pub async fn new(app_id: AppId, key: jsonwebtoken::EncodingKey) -> anyhow::Result<Self> {
         let client = Octocrab::builder()
             .app(app_id, key)
             .build()
             .context("build octocrab client")?;
 
+        Self::new_with_client(client).await
+    }
+
+    pub async fn new_with_client(client: Octocrab) -> anyhow::Result<Self> {
         let mut installations = HashMap::new();
         let mut user_to_installation = HashMap::new();
 
-        for installation in client.apps().installations().send().await.context("get installations")? {
+        let installs = client
+            .all_pages(client.apps().installations().send().await.context("get installations")?)
+            .await?;
+
+        for installation in installs {
             let client = client.installation(installation.id).context("build installation client")?;
-            let login = installation.account.login.clone();
             let installation_id = installation.id;
             let account_id = installation.account.id;
 
-            let client = Arc::new(
-                InstallationClient::new(client, installation)
-                    .await
-                    .with_context(|| format!("initialize installation client for {}", login))?,
-            );
+            let client = Arc::new(InstallationClient::new(client, installation.clone().into()));
 
-            client.fetch_repositories().await?;
+            if let Err(err) = client.fetch_repositories().await {
+                tracing::error!(
+                    "error fetching repositories for installation: {} ({}): {}",
+                    installation.account.login,
+                    installation_id,
+                    err
+                );
+            }
 
             user_to_installation.insert(account_id, installation_id);
             installations.insert(installation_id, client);
@@ -52,10 +64,12 @@ impl GitHubService {
         })
     }
 
+    /// Get an installation client by installation id
     pub fn get_client(&self, installation_id: InstallationId) -> Option<Arc<InstallationClient>> {
         self.installations.lock().get(&installation_id).cloned()
     }
 
+    /// Get an installation client by user id
     pub fn get_client_by_user(&self, user_id: UserId) -> Option<Arc<InstallationClient>> {
         self.installations
             .lock()
@@ -64,6 +78,7 @@ impl GitHubService {
             .cloned()
     }
 
+    /// Get an installation client by repository id
     pub fn get_client_by_repo(&self, repo_id: RepositoryId) -> Option<Arc<InstallationClient>> {
         self.installations
             .lock()
@@ -72,30 +87,41 @@ impl GitHubService {
             .cloned()
     }
 
+    /// Get all installation clients
     pub fn installations(&self) -> HashMap<InstallationId, Arc<InstallationClient>> {
         self.installations.lock().clone()
     }
 
+    /// Update an installation client
     pub async fn update_installation(&self, installation: Installation) -> anyhow::Result<()> {
         let install = self.installations.lock().get(&installation.id).cloned();
         if let Some(install) = install {
-            install.update_installation(installation);
-            install.fetch_repositories().await?;
+            install.update_installation(installation.clone());
+            if let Err(err) = install.fetch_repositories().await {
+                tracing::error!(
+                    "error fetching repositories for installation: {} ({}): {}",
+                    installation.account.login,
+                    installation.id,
+                    err
+                );
+            }
         } else {
             let installation_id = installation.id;
-            let login = installation.account.login.clone();
             let client = self
                 .client
                 .installation(installation_id)
                 .context("build installation client")?;
 
-            let client = Arc::new(
-                InstallationClient::new(client, installation)
-                    .await
-                    .with_context(|| format!("initialize installation client for {}", login))?,
-            );
+            let client = Arc::new(InstallationClient::new(client, installation.clone()));
 
-            client.fetch_repositories().await?;
+            if let Err(err) = client.fetch_repositories().await {
+                tracing::error!(
+                    "error fetching repositories for installation: {} ({}): {}",
+                    installation.account.login,
+                    installation_id,
+                    err
+                );
+            }
 
             self.installations.lock().insert(installation_id, client);
         }
@@ -103,6 +129,7 @@ impl GitHubService {
         Ok(())
     }
 
+    /// Delete an installation client
     pub fn delete_installation(&self, installation_id: InstallationId) {
         self.installations.lock().remove(&installation_id);
     }
@@ -267,5 +294,261 @@ mod test_utils {
             .header("content-type", "application/json")
             .body(Full::new(Bytes::from_static(body)))
             .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use http::StatusCode;
+    use models::User;
+    use test_utils::{debug_req, mock_octocrab, mock_response};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_new_with_client() {
+        let (octocrab, mut handle) = mock_octocrab();
+        let service = tokio::spawn(async move { GitHubService::new_with_client(octocrab).await.unwrap() });
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/app/installations?",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/installations.json")));
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: POST,
+            uri: "/app/installations/1/access_tokens",
+            headers: [
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: Some(
+                Object {},
+            ),
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/access_token.json")));
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/installation/repositories?per_page=100&page=1",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(
+            StatusCode::OK,
+            include_bytes!("mock/get_installation_repos.json"),
+        ));
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/repositories/1296269/contents/.github/brawl.toml?",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_config.json")));
+
+        let service = service.await.unwrap();
+
+        assert!(service.get_client(InstallationId(1)).is_some());
+        assert!(service.get_client(InstallationId(2)).is_none());
+        assert!(service.get_client_by_user(UserId(1)).is_some());
+        assert!(service.get_client_by_user(UserId(2)).is_none());
+        assert!(service.get_client_by_repo(RepositoryId(1296269)).is_some());
+        assert!(service.get_client_by_repo(RepositoryId(1296270)).is_none());
+        assert!(service.installations().len() == 1);
+
+        let task = tokio::spawn(async move {
+            service
+                .update_installation(Installation {
+                    id: InstallationId(1),
+                    account: User {
+                        login: "troykomodo".to_owned(),
+                        id: UserId(122814584),
+                    },
+                })
+                .await
+                .unwrap();
+
+            service
+                .update_installation(Installation {
+                    id: InstallationId(2),
+                    account: User {
+                        login: "troykomodo2".to_owned(),
+                        id: UserId(122814585),
+                    },
+                })
+                .await
+                .unwrap();
+
+            service
+        });
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/installation/repositories?per_page=100&page=1",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(
+            StatusCode::OK,
+            include_bytes!("mock/get_installation_repos.json"),
+        ));
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/repositories/1296269/contents/.github/brawl.toml?",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_config.json")));
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: POST,
+            uri: "/app/installations/2/access_tokens",
+            headers: [
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: Some(
+                Object {},
+            ),
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/access_token.json")));
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/installation/repositories?per_page=100&page=1",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(
+            StatusCode::OK,
+            include_bytes!("mock/get_installation_repos.json"),
+        ));
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/repositories/1296269/contents/.github/brawl.toml?",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_config.json")));
+
+        let service = task.await.unwrap();
+
+        assert!(service.get_client(InstallationId(1)).unwrap().owner() == "troykomodo");
+        assert!(service.get_client(InstallationId(2)).unwrap().owner() == "troykomodo2");
+
+        service.delete_installation(InstallationId(1));
+
+        assert!(service.get_client(InstallationId(1)).is_none());
+        assert!(service.installations().len() == 1);
+        assert!(service.get_client(InstallationId(2)).unwrap().owner() == "troykomodo2");
     }
 }

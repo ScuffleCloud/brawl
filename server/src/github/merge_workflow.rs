@@ -605,7 +605,8 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
             "ci run cancelled",
         );
 
-        if let Some(run_commit_sha) = &run.run_commit_sha {
+        // TODO: cancel runs on github actions
+        if let Some(_run_commit_sha) = &run.run_commit_sha {
             // let page = repo
             //     .client()
             //     .workflows(repo.owner.login.clone(), repo.name.clone())

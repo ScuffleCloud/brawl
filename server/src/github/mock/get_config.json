@@ -1,0 +1,18 @@
+{
+    "name": "brawl.toml",
+    "path": ".github/brawl.toml",
+    "sha": "3a4f45bb201512fbd88f7aca24a7bcaed8526c33",
+    "size": 317,
+    "url": "https://api.github.com/repos/ScuffleCloud/brawl/contents/.github/brawl.toml?ref=main",
+    "html_url": "https://github.com/ScuffleCloud/brawl/blob/main/.github/brawl.toml",
+    "git_url": "https://api.github.com/repos/ScuffleCloud/brawl/git/blobs/3a4f45bb201512fbd88f7aca24a7bcaed8526c33",
+    "download_url": "https://raw.githubusercontent.com/ScuffleCloud/brawl/main/.github/brawl.toml",
+    "type": "file",
+    "content": "ZW5hYmxlZCA9IHRydWUKCmJyYW5jaGVzID0gWwogICAgIm1haW4iLApdCgpt\nZXJnZV9wZXJtaXNzaW9ucyA9IFsKICAgICJyb2xlOndyaXRlIiwKXQoKW2xh\nYmVsc10Kb25fbWVyZ2VfcXVldWVkID0gIkItYnJhd2wtcXVldWVkIgpvbl9t\nZXJnZV9pbl9wcm9ncmVzcyA9ICJCLWJyYXdsLW1lcmdpbmciCm9uX21lcmdl\nX2ZhaWx1cmUgPSAiQi1icmF3bC1mYWlsZWQiCm9uX21lcmdlX3N1Y2Nlc3Mg\nPSAiQi1icmF3bC1tZXJnZWQiCm9uX3RyeV9pbl9wcm9ncmVzcyA9ICJCLWJy\nYXdsLXRyeSIKb25fdHJ5X2ZhaWx1cmUgPSAiQi1icmF3bC10cnktZmFpbGVk\nIgo=\n",
+    "encoding": "base64",
+    "_links": {
+        "self": "https://api.github.com/repos/ScuffleCloud/brawl/contents/.github/brawl.toml?ref=main",
+        "git": "https://api.github.com/repos/ScuffleCloud/brawl/git/blobs/3a4f45bb201512fbd88f7aca24a7bcaed8526c33",
+        "html": "https://github.com/ScuffleCloud/brawl/blob/main/.github/brawl.toml"
+    }
+}

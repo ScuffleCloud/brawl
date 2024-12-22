@@ -16,6 +16,7 @@ use scuffle_bootstrap_telemetry::opentelemetry_sdk::Resource;
 use scuffle_bootstrap_telemetry::prometheus_client::registry::Registry;
 use scuffle_brawl::database::schema::health_check;
 use scuffle_brawl::github::installation::InstallationClient;
+use scuffle_brawl::github::models::Installation;
 use scuffle_brawl::github::repo::RepoClient;
 use scuffle_brawl::github::GitHubService;
 use scuffle_metrics::opentelemetry::KeyValue;
@@ -181,7 +182,7 @@ impl scuffle_brawl::webhook::WebhookConfig for Global {
         Ok(())
     }
 
-    async fn update_installation(&self, installation: octocrab::models::Installation) -> anyhow::Result<()> {
+    async fn update_installation(&self, installation: Installation) -> anyhow::Result<()> {
         self.github_service.update_installation(installation).await?;
         Ok(())
     }
@@ -208,16 +209,10 @@ impl scuffle_brawl::auto_start::AutoStartConfig for Global {
         Ok(conn)
     }
 
-    async fn repo_client(&self, repo_id: octocrab::models::RepositoryId) -> anyhow::Result<Option<Arc<RepoClient>>> {
-        let Some(client) = self.github_service.get_client_by_repo(repo_id) else {
-            return Ok(None);
-        };
-
-        let Some(repo) = client.get_repo_client(repo_id) else {
-            return Ok(None);
-        };
-
-        Ok(Some(repo))
+    fn repo_client(&self, repo_id: octocrab::models::RepositoryId) -> Option<Arc<RepoClient>> {
+        let client = self.github_service.get_client_by_repo(repo_id)?;
+        let repo = client.get_repo_client(repo_id)?;
+        Some(repo)
     }
 }
 
