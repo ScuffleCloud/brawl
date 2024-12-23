@@ -100,7 +100,7 @@ jobs:
 
       - uses: taiki-e/install-action@v2
         with:
-          tool: diesel,just
+          tool: diesel_cli,just
 
       - name: Generate the schema
         run: diesel database setup
@@ -140,7 +140,7 @@ jobs:
 
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-nextest,cargo-llvm-cov,diesel
+          tool: cargo-nextest,cargo-llvm-cov,diesel_cli
 
       - name: Setup database
         run: diesel database setup
