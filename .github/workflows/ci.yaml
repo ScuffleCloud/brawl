@@ -104,11 +104,18 @@ jobs:
       - name: Run tests
         run: cargo +nightly llvm-cov nextest --no-fail-fast --all-features --lcov --output-path ./lcov.info --profile ci
 
+      - name: PR Override
+        if: ${{ startsWith(github.ref, 'refs/heads/automation/brawl/try/') }}
+        run: |
+          PR_NUMBER=$(echo ${{ github.ref }} | sed -n 's/^refs\/heads\/automation\/brawl\/try\/\([0-9]*\)$/\1/p')
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_ENV
+
       - uses: codecov/codecov-action@v5
         with:
           fail_ci_if_error: true
           files: ./lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
+          override_pr: ${{ env.PR_NUMBER || github.event.pull_request.number || '' }}
           verbose: true
 
       - name: Upload test results to Codecov
@@ -116,6 +123,7 @@ jobs:
         uses: codecov/test-results-action@v1
         with:
           files: ./target/nextest/ci/junit.xml
+          override_pr: ${{ env.PR_NUMBER || github.event.pull_request.number || '' }}
           token: ${{ secrets.CODECOV_TOKEN }}
 
   brawl-done:
