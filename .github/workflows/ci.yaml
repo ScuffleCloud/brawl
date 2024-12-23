@@ -88,8 +88,10 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+        ports:
+          - 5432:5432
     env:
-      DATABASE_URL: postgres://brawl:brawl@postgres:5432/brawl
+      DATABASE_URL: postgres://brawl:brawl@localhost:5432/brawl
     steps:
       - uses: actions/checkout@v4
 
@@ -122,8 +124,10 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+        ports:
+          - 5432:5432
     env:
-      DATABASE_URL: postgres://brawl:brawl@postgres:5432/brawl
+      DATABASE_URL: postgres://brawl:brawl@localhost:5432/brawl
     steps:
       - uses: actions/checkout@v4
 
