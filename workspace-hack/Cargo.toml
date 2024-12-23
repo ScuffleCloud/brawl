@@ -15,4 +15,22 @@ publish = false
 # are managed by hakari.
 
 ### BEGIN HAKARI SECTION
+[dependencies]
+regex = { version = "1", default-features = false, features = ["std", "unicode"] }
+regex-automata = { version = "0.4", default-features = false, features = ["meta", "std", "unicode"] }
+regex-syntax = { version = "0.8", default-features = false, features = ["std", "unicode"] }
+smallvec = { version = "1", default-features = false, features = ["const_new"] }
+tokio = { version = "1", features = ["full", "test-util"] }
+
+[build-dependencies]
+proc-macro2 = { version = "1" }
+quote = { version = "1" }
+syn = { version = "2", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+
+[target.x86_64-unknown-linux-gnu.dependencies]
+libc = { version = "0.2", features = ["extra_traits"] }
+
+[target.x86_64-apple-darwin.dependencies]
+libc = { version = "0.2", features = ["extra_traits"] }
+
 ### END HAKARI SECTION

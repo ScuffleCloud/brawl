@@ -2427,6 +2427,17 @@ dependencies = [
 [[package]]
 name = "scuffle-workspace-hack"
 version = "0.1.0"
+dependencies = [
+ "libc",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "regex-automata 0.4.9",
+ "regex-syntax 0.8.5",
+ "smallvec",
+ "syn",
+ "tokio",
+]
 
 [[package]]
 name = "secrecy"
