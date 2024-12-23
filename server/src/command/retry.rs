@@ -7,22 +7,32 @@ use crate::database::ci_run::CiRun;
 use crate::database::pr::Pr;
 use crate::github::merge_workflow::GitHubMergeWorkflow;
 use crate::github::messages;
+use crate::github::models::PullRequest;
 use crate::github::repo::GitHubRepoClient;
 
 pub async fn handle<R: GitHubRepoClient>(
     conn: &mut AsyncPgConnection,
     context: BrawlCommandContext<'_, R>,
 ) -> anyhow::Result<()> {
+    let pr = context.repo.get_pull_request(context.pr_number).await?;
+    handle_with_pr(conn, pr, context).await
+}
+
+async fn handle_with_pr<R: GitHubRepoClient>(
+    conn: &mut AsyncPgConnection,
+    pr: PullRequest,
+    context: BrawlCommandContext<'_, R>,
+) -> anyhow::Result<()> {
     if !context.repo.config().enabled {
         return Ok(());
     }
 
-    let pr = Pr::new(&context.pr, context.user.id, context.repo.id())
+    let db_pr = Pr::new(&pr, context.user.id, context.repo.id())
         .upsert()
         .get_result(conn)
         .await?;
 
-    let Some(run) = CiRun::latest(context.repo.id(), context.pr.number)
+    let Some(run) = CiRun::latest(context.repo.id(), pr.number)
         .get_result(conn)
         .await
         .optional()
@@ -31,7 +41,7 @@ pub async fn handle<R: GitHubRepoClient>(
         context
             .repo
             .send_message(
-                context.pr.number,
+                pr.number,
                 &messages::error_no_body("There has never been a merge run on this PR."),
             )
             .await?;
@@ -41,10 +51,7 @@ pub async fn handle<R: GitHubRepoClient>(
     if run.completed_at.is_none() {
         context
             .repo
-            .send_message(
-                context.pr.number,
-                &messages::error_no_body("The previous run has not completed yet."),
-            )
+            .send_message(pr.number, &messages::error_no_body("The previous run has not completed yet."))
             .await?;
 
         return Ok(());
@@ -60,7 +67,7 @@ pub async fn handle<R: GitHubRepoClient>(
         return Ok(());
     }
 
-    let run = CiRun::insert(context.repo.id(), context.pr.number)
+    let run = CiRun::insert(context.repo.id(), pr.number)
         .base_ref(run.base_ref)
         .head_commit_sha(run.head_commit_sha)
         .ci_branch(run.ci_branch)
@@ -74,7 +81,7 @@ pub async fn handle<R: GitHubRepoClient>(
         .await?;
 
     if run.is_dry_run {
-        context.repo.merge_workflow().start(&run, context.repo, conn, &pr).await?;
+        context.repo.merge_workflow().start(&run, context.repo, conn, &db_pr).await?;
     } else {
         context.repo.merge_workflow().queued(&run, context.repo).await?;
     }
@@ -145,18 +152,19 @@ mod tests {
         let (client, mut rx) = MockRepoClient::new(mock.clone());
 
         let task = tokio::spawn(async move {
-            handle(
+            handle_with_pr(
                 &mut conn,
+                PullRequest {
+                    number: 1,
+                    ..Default::default()
+                },
                 BrawlCommandContext {
                     repo: &client,
                     user: User {
                         id: UserId(1),
                         login: "test".into(),
                     },
-                    pr: PullRequest {
-                        number: 1,
-                        ..Default::default()
-                    },
+                    pr_number: 1,
                 },
             )
             .await
@@ -221,18 +229,19 @@ mod tests {
             .unwrap();
 
         let task = tokio::spawn(async move {
-            handle(
+            handle_with_pr(
                 &mut conn,
+                PullRequest {
+                    number: 1,
+                    ..Default::default()
+                },
                 BrawlCommandContext {
                     repo: &client,
                     user: User {
                         id: UserId(1),
                         login: "test".into(),
                     },
-                    pr: PullRequest {
-                        number: 1,
-                        ..Default::default()
-                    },
+                    pr_number: 1,
                 },
             )
             .await
@@ -313,18 +322,19 @@ mod tests {
         let task = tokio::spawn(async move {
             tokio::time::timeout(
                 std::time::Duration::from_secs(1),
-                handle(
+                handle_with_pr(
                     &mut conn,
+                    PullRequest {
+                        number: 1,
+                        ..Default::default()
+                    },
                     BrawlCommandContext {
                         repo: &client,
                         user: User {
                             id: UserId(1),
                             login: "test".into(),
                         },
-                        pr: PullRequest {
-                            number: 1,
-                            ..Default::default()
-                        },
+                        pr_number: 1,
                     },
                 ),
             )
@@ -421,18 +431,19 @@ mod tests {
         let task = tokio::spawn(async move {
             tokio::time::timeout(
                 std::time::Duration::from_secs(1),
-                handle(
+                handle_with_pr(
                     &mut conn,
+                    PullRequest {
+                        number: 1,
+                        ..Default::default()
+                    },
                     BrawlCommandContext {
                         repo: &client,
                         user: User {
                             id: UserId(1),
                             login: "test".into(),
                         },
-                        pr: PullRequest {
-                            number: 1,
-                            ..Default::default()
-                        },
+                        pr_number: 1,
                     },
                 ),
             )
@@ -529,18 +540,19 @@ mod tests {
         let task = tokio::spawn(async move {
             tokio::time::timeout(
                 std::time::Duration::from_secs(1),
-                handle(
+                handle_with_pr(
                     &mut conn,
+                    PullRequest {
+                        number: 1,
+                        ..Default::default()
+                    },
                     BrawlCommandContext {
                         repo: &client,
                         user: User {
                             id: UserId(1),
                             login: "test".into(),
                         },
-                        pr: PullRequest {
-                            number: 1,
-                            ..Default::default()
-                        },
+                        pr_number: 1,
                     },
                 ),
             )
@@ -588,30 +600,44 @@ mod tests {
     async fn test_retry_not_enabled() {
         let mut conn = get_test_connection().await;
         let mock = MockMergeWorkFlow::default();
-        let (client, _) = MockRepoClient::new(mock.clone());
+        let (client, mut rx) = MockRepoClient::new(mock.clone());
 
         let client = client.with_config(GitHubBrawlRepoConfig {
             enabled: false,
             ..Default::default()
         });
 
-        BrawlCommand::Retry
-            .handle(
-                &mut conn,
-                BrawlCommandContext {
-                    repo: &client,
-                    user: User {
-                        id: UserId(1),
-                        login: "test".into(),
+        let task = tokio::spawn(async move {
+            BrawlCommand::Retry
+                .handle(
+                    &mut conn,
+                    BrawlCommandContext {
+                        repo: &client,
+                        user: User {
+                            id: UserId(1),
+                            login: "test".into(),
+                        },
+                        pr_number: 1,
                     },
-                    pr: PullRequest {
+                )
+                .await
+                .unwrap();
+        });
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::GetPullRequest { number, result } => {
+                assert_eq!(number, 1);
+                result
+                    .send(Ok(PullRequest {
                         number: 1,
                         ..Default::default()
-                    },
-                },
-            )
-            .await
-            .unwrap();
+                    }))
+                    .unwrap();
+            }
+            r => panic!("unexpected action: {:?}", r),
+        }
+
+        task.await.unwrap();
 
         assert!(!AtomicBool::load(&mock.start, std::sync::atomic::Ordering::Relaxed));
         assert!(!AtomicBool::load(&mock.queued, std::sync::atomic::Ordering::Relaxed));

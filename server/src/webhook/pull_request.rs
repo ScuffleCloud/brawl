@@ -2,40 +2,42 @@ use anyhow::Context;
 use diesel::OptionalExtension;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
-use super::BrawlCommandContext;
 use crate::database::ci_run::CiRun;
 use crate::database::enums::GithubCiRunStatus;
 use crate::database::pr::Pr;
 use crate::github::merge_workflow::GitHubMergeWorkflow;
 use crate::github::messages;
+use crate::github::models::{PullRequest, User};
 use crate::github::repo::GitHubRepoClient;
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum PullRequestCommand {
-    Opened,
-    Push,
-    IntoDraft,
-    ReadyForReview,
-    Closed,
+pub async fn handle<R: GitHubRepoClient>(
+    repo: &R,
+    conn: &mut AsyncPgConnection,
+    pr_number: u64,
+    user: User,
+) -> anyhow::Result<()> {
+    let pr = repo.get_pull_request(pr_number).await?;
+    handle_with_pr(repo, conn, pr, user).await
 }
 
-pub async fn handle<R: GitHubRepoClient>(
+pub async fn handle_with_pr<R: GitHubRepoClient>(
+    repo: &R,
     conn: &mut AsyncPgConnection,
-    context: BrawlCommandContext<'_, R>,
-    _: PullRequestCommand,
+    pr: PullRequest,
+    user: User,
 ) -> anyhow::Result<()> {
-    if let Some(current) = Pr::find(context.repo.id(), context.pr.number)
+    if let Some(current) = Pr::find(repo.id(), pr.number)
         .get_result(conn)
         .await
         .optional()
         .context("fetch pr")?
     {
-        let update = current.update_from(&context.pr);
+        let update = current.update_from(&pr);
         if update.needs_update() {
             update.query().execute(conn).await?;
 
             // Fetch the active run (if there is one)
-            let run = CiRun::active(context.repo.id(), context.pr.number)
+            let run = CiRun::active(repo.id(), pr.number)
                 .get_result(conn)
                 .await
                 .optional()
@@ -43,26 +45,24 @@ pub async fn handle<R: GitHubRepoClient>(
 
             match run {
                 Some(run) if !run.is_dry_run => {
-                    context.repo.merge_workflow().cancel(&run, context.repo, conn).await?;
-                    context
-                        .repo
-                        .send_message(
-                            run.github_pr_number as u64,
-                            &messages::error_no_body(format!(
-                                "PR has changed while a merge was {}, cancelling the merge job.",
-                                match run.status {
-                                    GithubCiRunStatus::Queued => "queued",
-                                    _ => "in progress",
-                                },
-                            )),
-                        )
-                        .await?;
+                    repo.merge_workflow().cancel(&run, repo, conn).await?;
+                    repo.send_message(
+                        run.github_pr_number as u64,
+                        &messages::error_no_body(format!(
+                            "PR has changed while a merge was {}, cancelling the merge job.",
+                            match run.status {
+                                GithubCiRunStatus::Queued => "queued",
+                                _ => "in progress",
+                            },
+                        )),
+                    )
+                    .await?;
                 }
                 _ => {}
             }
         }
     } else {
-        Pr::new(&context.pr, context.user.id, context.repo.id())
+        Pr::new(&pr, user.id, repo.id())
             .insert()
             .execute(conn)
             .await
@@ -83,7 +83,6 @@ mod tests {
     use octocrab::models::UserId;
 
     use super::*;
-    use crate::command::BrawlCommand;
     use crate::database::ci_run::Base;
     use crate::database::get_test_connection;
     use crate::github::models::{PullRequest, User};
@@ -119,31 +118,36 @@ mod tests {
     async fn test_pr_opened() {
         let mut conn = get_test_connection().await;
         let mock = MockMergeWorkFlow::default();
-        let (client, _) = MockRepoClient::new(mock.clone());
-
-        let pr = PullRequest {
-            number: 1,
-            ..Default::default()
-        };
+        let (client, mut rx) = MockRepoClient::new(mock.clone());
 
         let task = tokio::spawn(async move {
-            BrawlCommand::PullRequest(PullRequestCommand::Opened)
-                .handle(
-                    &mut conn,
-                    BrawlCommandContext {
-                        repo: &client,
-                        pr,
-                        user: User {
-                            id: UserId(1),
-                            login: "test".to_string(),
-                        },
-                    },
-                )
-                .await
-                .unwrap();
+            handle(
+                &client,
+                &mut conn,
+                1,
+                User {
+                    id: UserId(1),
+                    login: "test".to_string(),
+                },
+            )
+            .await
+            .unwrap();
 
             (conn, client)
         });
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::GetPullRequest { number, result } => {
+                assert_eq!(number, 1);
+                result
+                    .send(Ok(PullRequest {
+                        number: 1,
+                        ..Default::default()
+                    }))
+                    .unwrap();
+            }
+            r => panic!("unexpected action: {:?}", r),
+        }
 
         let (mut conn, client) = task.await.unwrap();
 
@@ -185,24 +189,21 @@ mod tests {
             .unwrap();
 
         let task = tokio::spawn(async move {
-            BrawlCommand::PullRequest(PullRequestCommand::Push)
-                .handle(
-                    &mut conn,
-                    BrawlCommandContext {
-                        repo: &client,
-                        pr: PullRequest {
-                            number: 1,
-                            title: "test".to_string(),
-                            ..Default::default()
-                        },
-                        user: User {
-                            id: UserId(1),
-                            login: "test".to_string(),
-                        },
-                    },
-                )
-                .await
-                .unwrap();
+            handle_with_pr(
+                &client,
+                &mut conn,
+                PullRequest {
+                    number: 1,
+                    title: "test".to_string(),
+                    ..Default::default()
+                },
+                User {
+                    id: UserId(1),
+                    login: "test".to_string(),
+                },
+            )
+            .await
+            .unwrap();
 
             (conn, client)
         });
@@ -261,25 +262,22 @@ mod tests {
             .unwrap();
 
         let task = tokio::spawn(async move {
-            BrawlCommand::PullRequest(PullRequestCommand::Push)
-                .handle(
-                    &mut conn,
-                    BrawlCommandContext {
-                        repo: &client,
-                        pr: PullRequest {
-                            number: 1,
-                            title: "test".to_string(),
-                            body: "test".to_string(),
-                            ..Default::default()
-                        },
-                        user: User {
-                            id: UserId(1),
-                            login: "test".to_string(),
-                        },
-                    },
-                )
-                .await
-                .unwrap();
+            handle_with_pr(
+                &client,
+                &mut conn,
+                PullRequest {
+                    number: 1,
+                    title: "test".to_string(),
+                    body: "test".to_string(),
+                    ..Default::default()
+                },
+                User {
+                    id: UserId(1),
+                    login: "test".to_string(),
+                },
+            )
+            .await
+            .unwrap();
 
             (conn, client)
         });
@@ -325,25 +323,22 @@ mod tests {
             .unwrap();
 
         let task = tokio::spawn(async move {
-            BrawlCommand::PullRequest(PullRequestCommand::Push)
-                .handle(
-                    &mut conn,
-                    BrawlCommandContext {
-                        repo: &client,
-                        pr: PullRequest {
-                            number: 1,
-                            title: "test".to_string(),
-                            body: "2".to_string(),
-                            ..Default::default()
-                        },
-                        user: User {
-                            id: UserId(1),
-                            login: "test".to_string(),
-                        },
-                    },
-                )
-                .await
-                .unwrap();
+            handle_with_pr(
+                &client,
+                &mut conn,
+                PullRequest {
+                    number: 1,
+                    title: "test".to_string(),
+                    body: "2".to_string(),
+                    ..Default::default()
+                },
+                User {
+                    id: UserId(1),
+                    login: "test".to_string(),
+                },
+            )
+            .await
+            .unwrap();
 
             (conn, client)
         });

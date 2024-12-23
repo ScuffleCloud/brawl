@@ -9,15 +9,14 @@ use diesel::query_dsl::methods::FindDsl;
 use diesel::ExpressionMethods;
 use diesel_async::pooled_connection::bb8::{self};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use octocrab::models::InstallationId;
+use octocrab::models::{InstallationId, RepositoryId};
 use scuffle_bootstrap_telemetry::opentelemetry;
 use scuffle_bootstrap_telemetry::opentelemetry_sdk::metrics::SdkMeterProvider;
 use scuffle_bootstrap_telemetry::opentelemetry_sdk::Resource;
 use scuffle_bootstrap_telemetry::prometheus_client::registry::Registry;
 use scuffle_brawl::database::schema::health_check;
-use scuffle_brawl::github::installation::InstallationClient;
 use scuffle_brawl::github::models::Installation;
-use scuffle_brawl::github::repo::RepoClient;
+use scuffle_brawl::github::repo::{GitHubRepoClient, RepoClient};
 use scuffle_brawl::github::GitHubService;
 use scuffle_metrics::opentelemetry::KeyValue;
 use tracing_subscriber::layer::SubscriberExt;
@@ -59,7 +58,6 @@ pub struct Global {
     metrics_registry: Registry,
     database: bb8::Pool<AsyncPgConnection>,
     github_service: GitHubService,
-    start_time: std::time::Instant,
 }
 
 impl scuffle_bootstrap::Global for Global {
@@ -127,7 +125,6 @@ impl scuffle_bootstrap::Global for Global {
             metrics_registry,
             database,
             github_service,
-            start_time: std::time::Instant::now(),
         }))
     }
 }
@@ -173,8 +170,30 @@ impl scuffle_brawl::webhook::WebhookConfig for Global {
         &self.config.github.webhook_secret
     }
 
-    fn installation_client(&self, installation_id: InstallationId) -> Option<Arc<InstallationClient>> {
-        self.github_service.get_client(installation_id)
+    fn get_repo(
+        &self,
+        installation_id: InstallationId,
+        repo_id: RepositoryId,
+    ) -> Option<Arc<impl GitHubRepoClient + 'static>> {
+        self.github_service.get_client(installation_id)?.get_repo_client(repo_id)
+    }
+
+    async fn add_repo(&self, installation_id: InstallationId, repo_id: RepositoryId) -> anyhow::Result<()> {
+        let client = self
+            .github_service
+            .get_client(installation_id)
+            .context("get installation client")?;
+        client.fetch_repository(repo_id).await?;
+        Ok(())
+    }
+
+    async fn remove_repo(&self, installation_id: InstallationId, repo_id: RepositoryId) -> anyhow::Result<()> {
+        let client = self
+            .github_service
+            .get_client(installation_id)
+            .context("get installation client")?;
+        client.remove_repository(repo_id);
+        Ok(())
     }
 
     fn delete_installation(&self, installation_id: InstallationId) -> anyhow::Result<()> {
@@ -190,10 +209,6 @@ impl scuffle_brawl::webhook::WebhookConfig for Global {
     async fn database(&self) -> anyhow::Result<impl DerefMut<Target = AsyncPgConnection> + Send> {
         let conn = self.database.get().await.context("get database connection")?;
         Ok(conn)
-    }
-
-    fn uptime(&self) -> std::time::Duration {
-        std::time::Instant::now() - self.start_time
     }
 }
 

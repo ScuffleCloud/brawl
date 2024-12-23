@@ -8,10 +8,11 @@ use crate::database::enums::GithubCiRunStatus;
 use crate::database::pr::Pr;
 use crate::github::merge_workflow::GitHubMergeWorkflow;
 use crate::github::messages;
+use crate::github::models::PullRequest;
 use crate::github::repo::GitHubRepoClient;
 use crate::utils::format_fn;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DryRunCommand {
     pub head_sha: Option<String>,
     pub base_sha: Option<String>,
@@ -19,6 +20,16 @@ pub struct DryRunCommand {
 
 pub async fn handle<R: GitHubRepoClient>(
     conn: &mut AsyncPgConnection,
+    context: BrawlCommandContext<'_, R>,
+    command: DryRunCommand,
+) -> anyhow::Result<()> {
+    let pr = context.repo.get_pull_request(context.pr_number).await?;
+    handle_with_pr(conn, pr, context, command).await
+}
+
+async fn handle_with_pr<R: GitHubRepoClient>(
+    conn: &mut AsyncPgConnection,
+    pr: PullRequest,
     context: BrawlCommandContext<'_, R>,
     mut command: DryRunCommand,
 ) -> anyhow::Result<()> {
@@ -36,7 +47,7 @@ pub async fn handle<R: GitHubRepoClient>(
             context
                 .repo
                 .send_message(
-                    context.pr.number,
+                    pr.number,
                     &messages::error_no_body(format!("Base commit `{base_sha}` was not found")),
                 )
                 .await?;
@@ -51,7 +62,7 @@ pub async fn handle<R: GitHubRepoClient>(
             context
                 .repo
                 .send_message(
-                    context.pr.number,
+                    pr.number,
                     &messages::error_no_body(format!("Head commit `{head_sha}` was not found")),
                 )
                 .await?;
@@ -65,11 +76,11 @@ pub async fn handle<R: GitHubRepoClient>(
         .base_sha
         .as_deref()
         .map(Base::from_sha)
-        .unwrap_or_else(|| Base::from_pr(&context.pr));
+        .unwrap_or_else(|| Base::from_pr(&pr));
 
-    let branch = context.repo.config().try_branch(context.pr.number);
+    let branch = context.repo.config().try_branch(pr.number);
 
-    if let Some(run) = CiRun::active(context.repo.id(), context.pr.number)
+    if let Some(run) = CiRun::active(context.repo.id(), pr.number)
         .get_result(conn)
         .await
         .optional()
@@ -86,7 +97,7 @@ pub async fn handle<R: GitHubRepoClient>(
             context
                 .repo
                 .send_message(
-                    context.pr.number,
+                    pr.number,
                     &messages::error_no_body(format_fn(|f| {
                         write!(
                             f,
@@ -104,21 +115,15 @@ pub async fn handle<R: GitHubRepoClient>(
         }
     }
 
-    let pr = Pr::new(&context.pr, context.user.id, context.repo.id())
+    let db_pr = Pr::new(&pr, context.user.id, context.repo.id())
         .upsert()
         .get_result(conn)
         .await
         .context("update pr")?;
 
-    let run = CiRun::insert(context.repo.id(), context.pr.number)
+    let run = CiRun::insert(context.repo.id(), pr.number)
         .base_ref(base)
-        .head_commit_sha(
-            command
-                .head_sha
-                .as_deref()
-                .unwrap_or_else(|| context.pr.head.sha.as_ref())
-                .into(),
-        )
+        .head_commit_sha(command.head_sha.as_deref().unwrap_or_else(|| pr.head.sha.as_ref()).into())
         .ci_branch(branch.into())
         .requested_by_id(context.user.id.0 as i64)
         .is_dry_run(true)
@@ -129,7 +134,7 @@ pub async fn handle<R: GitHubRepoClient>(
         .await
         .context("insert ci run")?;
 
-    context.repo.merge_workflow().start(&run, context.repo, conn, &pr).await?;
+    context.repo.merge_workflow().start(&run, context.repo, conn, &db_pr).await?;
 
     Ok(())
 }
@@ -253,7 +258,7 @@ mod tests {
                 &mut conn,
                 BrawlCommandContext {
                     repo: &client,
-                    pr,
+                    pr_number: 1,
                     user: User {
                         id: UserId(3),
                         login: "test".to_string(),
@@ -265,6 +270,14 @@ mod tests {
 
             (conn, client)
         });
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::GetPullRequest { number, result } => {
+                assert_eq!(number, 1);
+                result.send(Ok(pr)).unwrap();
+            }
+            _ => panic!("unexpected action"),
+        }
 
         match rx.recv().await.unwrap() {
             MockRepoAction::HasPermission {
@@ -338,11 +351,12 @@ mod tests {
             .id;
 
         let task = tokio::spawn(async move {
-            handle(
+            handle_with_pr(
                 &mut conn,
+                pr,
                 BrawlCommandContext {
                     repo: &client,
-                    pr,
+                    pr_number: 1,
                     user: User {
                         id: UserId(3),
                         login: "test".to_string(),
@@ -440,11 +454,12 @@ mod tests {
             .id;
 
         let task = tokio::spawn(async move {
-            handle(
+            handle_with_pr(
                 &mut conn,
+                pr,
                 BrawlCommandContext {
                     repo: &client,
-                    pr,
+                    pr_number: 1,
                     user: User {
                         id: UserId(3),
                         login: "test".to_string(),
@@ -527,11 +542,12 @@ mod tests {
         };
 
         let task = tokio::spawn(async move {
-            handle(
+            handle_with_pr(
                 &mut conn,
+                pr,
                 BrawlCommandContext {
                     repo: &client,
-                    pr,
+                    pr_number: 1,
                     user: User {
                         id: UserId(3),
                         login: "test".to_string(),
@@ -626,11 +642,12 @@ mod tests {
         };
 
         let task = tokio::spawn(async move {
-            handle(
+            handle_with_pr(
                 &mut conn,
+                pr,
                 BrawlCommandContext {
                     repo: &client,
-                    pr,
+                    pr_number: 1,
                     user: User {
                         id: UserId(3),
                         login: "test".to_string(),
@@ -715,11 +732,12 @@ mod tests {
         };
 
         let task = tokio::spawn(async move {
-            handle(
+            handle_with_pr(
                 &mut conn,
+                pr,
                 BrawlCommandContext {
                     repo: &client,
-                    pr,
+                    pr_number: 1,
                     user: User {
                         id: UserId(3),
                         login: "test".to_string(),
@@ -797,11 +815,12 @@ mod tests {
         };
 
         let task = tokio::spawn(async move {
-            handle(
+            handle_with_pr(
                 &mut conn,
+                pr,
                 BrawlCommandContext {
                     repo: &client,
-                    pr,
+                    pr_number: 1,
                     user: User {
                         id: UserId(3),
                         login: "test".to_string(),
@@ -854,11 +873,12 @@ mod tests {
             ..Default::default()
         };
 
-        handle(
+        handle_with_pr(
             &mut conn,
+            pr,
             BrawlCommandContext {
                 repo: &client,
-                pr,
+                pr_number: 1,
                 user: User {
                     id: UserId(3),
                     login: "test".to_string(),

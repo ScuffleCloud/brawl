@@ -1,10 +1,16 @@
+use std::str::FromStr;
+
 use axum::body::Body;
 use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
 use hmac::{Hmac, Mac};
+use octocrab::models::webhook_events::payload::{
+    InstallationWebhookEventAction, IssueCommentWebhookEventAction, RepositoryWebhookEventAction,
+};
 use octocrab::models::webhook_events::{EventInstallation, WebhookEventPayload, WebhookEventType};
-use octocrab::models::InstallationId;
+use octocrab::models::{InstallationId, RepositoryId};
 use sha2::Sha256;
 
+use crate::command::BrawlCommand;
 use crate::github::models::{Installation, Repository, User};
 
 fn verify_gh_signature(headers: &HeaderMap<HeaderValue>, body: &[u8], secret: &str) -> bool {
@@ -21,7 +27,7 @@ fn verify_gh_signature(headers: &HeaderMap<HeaderValue>, body: &[u8], secret: &s
 }
 
 #[derive(Debug, Clone)]
-pub struct WebhookEvent {
+struct WebhookEvent {
     pub sender: Option<User>,
     pub repository: Option<Repository>,
     pub installtion_id: Option<InstallationId>,
@@ -30,10 +36,43 @@ pub struct WebhookEvent {
     pub specific: WebhookEventPayload,
 }
 
-fn parse_event(header: String, body: &[u8]) -> Result<WebhookEvent, (StatusCode, String)> {
-    // NOTE: this is inefficient code to simply reuse the code from "derived"
-    // serde::Deserialize instead of writing specific deserialization code for the
-    // enum.
+#[derive(Debug, Clone)]
+pub enum WebhookEventAction {
+    Command {
+        installation_id: InstallationId,
+        command: BrawlCommand,
+        repo_id: RepositoryId,
+        pr_number: u64,
+        user: User,
+    },
+    PullRequest {
+        installation_id: InstallationId,
+        repo_id: RepositoryId,
+        pr_number: u64,
+        user: User,
+    },
+    CheckRun {
+        installation_id: InstallationId,
+        repo_id: RepositoryId,
+        check_run: serde_json::Value,
+    },
+    DeleteInstallation {
+        installation_id: InstallationId,
+    },
+    AddRepository {
+        installation_id: InstallationId,
+        repo_id: RepositoryId,
+    },
+    RemoveRepository {
+        installation_id: InstallationId,
+        repo_id: RepositoryId,
+    },
+    UpdateInstallation {
+        installation: Installation,
+    },
+}
+
+fn parse_event(header: String, body: &[u8]) -> Result<Vec<WebhookEventAction>, (StatusCode, String)> {
     let kind: WebhookEventType =
         serde_json::from_value(serde_json::Value::String(header)).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
@@ -74,7 +113,7 @@ fn parse_event(header: String, body: &[u8]) -> Result<WebhookEvent, (StatusCode,
         .parse_specific_payload(specific)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    Ok(WebhookEvent {
+    let actions = parse_webhook(WebhookEvent {
         sender: sender.map(|s| s.into()),
         repository: repository.map(|r| r.into()),
         installtion_id: match &installation {
@@ -88,10 +127,135 @@ fn parse_event(header: String, body: &[u8]) -> Result<WebhookEvent, (StatusCode,
         },
         kind,
         specific,
-    })
+    });
+
+    Ok(actions)
 }
 
-pub async fn parse_from_request(request: Request<Body>, secret: &str) -> Result<WebhookEvent, (StatusCode, String)> {
+fn parse_webhook(mut event: WebhookEvent) -> Vec<WebhookEventAction> {
+    let mut actions = vec![];
+
+    if let Some(installation) = event.installation {
+        actions.push(WebhookEventAction::UpdateInstallation { installation });
+    }
+
+    let Some(installation_id) = event.installtion_id else {
+        tracing::warn!("event does not have an installation id: {:?}", event.kind);
+        return actions;
+    };
+
+    match event.specific {
+        WebhookEventPayload::Installation(install_event) => match install_event.action {
+            InstallationWebhookEventAction::Deleted | InstallationWebhookEventAction::Suspend => {
+                actions.push(WebhookEventAction::DeleteInstallation { installation_id });
+            }
+            _ => {}
+        },
+        WebhookEventPayload::InstallationRepositories(event) => {
+            for repo in event.repositories_added {
+                actions.push(WebhookEventAction::AddRepository {
+                    installation_id,
+                    repo_id: repo.id,
+                });
+            }
+
+            for repo in event.repositories_removed {
+                actions.push(WebhookEventAction::RemoveRepository {
+                    installation_id,
+                    repo_id: repo.id,
+                });
+            }
+        }
+        WebhookEventPayload::Repository(repo_event) => {
+            let Some(repo) = event.repository else {
+                return actions;
+            };
+
+            match repo_event.action {
+                RepositoryWebhookEventAction::Deleted | RepositoryWebhookEventAction::Archived => {
+                    actions.push(WebhookEventAction::RemoveRepository {
+                        installation_id,
+                        repo_id: repo.id,
+                    });
+                }
+                _ => {
+                    actions.push(WebhookEventAction::AddRepository {
+                        installation_id,
+                        repo_id: repo.id,
+                    });
+                }
+            }
+        }
+        WebhookEventPayload::PullRequest(mut pull_request_event) => {
+            let Some(repo_id) = event.repository.as_ref().map(|r| r.id).or(pull_request_event
+                .pull_request
+                .repo
+                .as_deref()
+                .map(|r| r.id))
+            else {
+                return actions;
+            };
+
+            let Some(user) = event
+                .sender
+                .take()
+                .or_else(|| pull_request_event.pull_request.user.take().map(|u| (*u).into()))
+            else {
+                return actions;
+            };
+
+            actions.push(WebhookEventAction::PullRequest {
+                installation_id,
+                repo_id,
+                pr_number: pull_request_event.pull_request.number,
+                user,
+            });
+        }
+        WebhookEventPayload::IssueComment(issue_comment_event)
+            if issue_comment_event.action == IssueCommentWebhookEventAction::Created
+                && issue_comment_event.issue.pull_request.is_some() =>
+        {
+            let Some(body) = issue_comment_event.comment.body.as_ref() else {
+                return actions;
+            };
+
+            let Ok(command) = BrawlCommand::from_str(body) else {
+                return actions;
+            };
+
+            let Some(repo) = event.repository else {
+                return actions;
+            };
+
+            actions.push(WebhookEventAction::Command {
+                installation_id,
+                command,
+                repo_id: repo.id,
+                pr_number: issue_comment_event.issue.number,
+                user: issue_comment_event.comment.user.into(),
+            });
+        }
+        WebhookEventPayload::CheckRun(check_run_event) => {
+            let Some(repo) = event.repository else {
+                return actions;
+            };
+
+            actions.push(WebhookEventAction::CheckRun {
+                installation_id,
+                repo_id: repo.id,
+                check_run: check_run_event.check_run,
+            });
+        }
+        _ => {}
+    }
+
+    actions
+}
+
+pub async fn parse_from_request(
+    request: Request<Body>,
+    secret: &str,
+) -> Result<Vec<WebhookEventAction>, (StatusCode, String)> {
     let (parts, body) = request.into_parts();
     let Some(header) = parts.headers.get("X-GitHub-Event").and_then(|v| v.to_str().ok()) else {
         return Err((StatusCode::BAD_REQUEST, "Missing X-GitHub-Event header".to_string()));
@@ -155,6 +319,55 @@ mod tests {
         )
         .expect("event parsed");
         insta::assert_debug_snapshot!("webhook.pull_request_review.submitted", event);
+
+        let event = parse_event(
+            "issue_comment".to_string(),
+            include_bytes!("mock/webhook.issue_comment.created-brawl-cmd.json"),
+        )
+        .expect("event parsed");
+        insta::assert_debug_snapshot!("webhook.issue_comment.created-brawl-cmd", event);
+
+        let event = parse_event(
+            "installation_repositories".to_string(),
+            include_bytes!("mock/webhook.installation_repositories.added.json"),
+        )
+        .expect("event parsed");
+        insta::assert_debug_snapshot!("webhook.installation_repositories.added", event);
+
+        let event = parse_event(
+            "installation_repositories".to_string(),
+            include_bytes!("mock/webhook.installation_repositories.removed.json"),
+        )
+        .expect("event parsed");
+        insta::assert_debug_snapshot!("webhook.installation_repositories.removed", event);
+
+        let event = parse_event(
+            "repository".to_string(),
+            include_bytes!("mock/webhook.repository.deleted.json"),
+        )
+        .expect("event parsed");
+        insta::assert_debug_snapshot!("webhook.repository.deleted", event);
+
+        let event = parse_event(
+            "repository".to_string(),
+            include_bytes!("mock/webhook.repository.created.json"),
+        )
+        .expect("event parsed");
+        insta::assert_debug_snapshot!("webhook.repository.created", event);
+
+        let event = parse_event(
+            "installation".to_string(),
+            include_bytes!("mock/webhook.installation.suspend.json"),
+        )
+        .expect("event parsed");
+        insta::assert_debug_snapshot!("webhook.installation.suspend", event);
+
+        let event = parse_event(
+            "installation".to_string(),
+            include_bytes!("mock/webhook.installation.unsuspend.json"),
+        )
+        .expect("event parsed");
+        insta::assert_debug_snapshot!("webhook.installation.unsuspend", event);
     }
 
     #[test]

@@ -12,7 +12,7 @@ pub async fn handle<R: GitHubRepoClient>(
     context
         .repo
         .send_message(
-            context.pr.number,
+            context.pr_number,
             &messages::pong(
                 context.user.login,
                 if context.repo.config().enabled {
@@ -36,7 +36,7 @@ mod tests {
     use crate::command::BrawlCommand;
     use crate::database::get_test_connection;
     use crate::github::merge_workflow::GitHubMergeWorkflow;
-    use crate::github::models::{PullRequest, User};
+    use crate::github::models::User;
     use crate::github::repo::test_utils::{MockRepoAction, MockRepoClient};
 
     struct MockMergeWorkFlow;
@@ -54,7 +54,7 @@ mod tests {
                     &mut conn,
                     BrawlCommandContext {
                         repo: &client,
-                        pr: PullRequest::default(),
+                        pr_number: 0,
                         user: User {
                             id: UserId(1),
                             login: "troy".to_string(),
@@ -94,7 +94,7 @@ mod tests {
                 &mut conn,
                 BrawlCommandContext {
                     repo: &client,
-                    pr: PullRequest::default(),
+                    pr_number: 0,
                     user: User {
                         id: UserId(1),
                         login: "troy".to_string(),

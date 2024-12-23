@@ -10,9 +10,10 @@ use crate::database::ci_run::{Base, CiRun};
 use crate::database::pr::Pr;
 use crate::github::merge_workflow::GitHubMergeWorkflow;
 use crate::github::messages;
+use crate::github::models::PullRequest;
 use crate::github::repo::GitHubRepoClient;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MergeCommand {
     pub priority: Option<i32>,
 }
@@ -22,11 +23,21 @@ pub async fn handle<R: GitHubRepoClient>(
     context: BrawlCommandContext<'_, R>,
     command: MergeCommand,
 ) -> anyhow::Result<()> {
+    let pr = context.repo.get_pull_request(context.pr_number).await?;
+    handle_with_pr(conn, pr, context, command).await
+}
+
+async fn handle_with_pr<R: GitHubRepoClient>(
+    conn: &mut AsyncPgConnection,
+    pr: PullRequest,
+    context: BrawlCommandContext<'_, R>,
+    command: MergeCommand,
+) -> anyhow::Result<()> {
     if !context.repo.config().enabled {
         return Ok(());
     }
 
-    if context.pr.merged_at.is_some() {
+    if pr.merged_at.is_some() {
         tracing::debug!("pull request already merged");
         return Ok(());
     }
@@ -36,7 +47,7 @@ pub async fn handle<R: GitHubRepoClient>(
         return Ok(());
     }
 
-    if CiRun::active(context.repo.id(), context.pr.number)
+    if CiRun::active(context.repo.id(), pr.number)
         .get_result(conn)
         .await
         .optional()
@@ -44,7 +55,7 @@ pub async fn handle<R: GitHubRepoClient>(
         .is_some()
     {
         context.repo.send_message(
-            context.pr.number,
+            pr.number,
             &messages::error_no_body(
                 "Cannot add PR to merge queue while another run is pending, use `?brawl cancel` to cancel it first & then try again."
             ),
@@ -53,15 +64,15 @@ pub async fn handle<R: GitHubRepoClient>(
         return Ok(());
     }
 
-    let mut pr = Pr::new(&context.pr, context.user.id, context.repo.id());
+    let mut db_pr = Pr::new(&pr, context.user.id, context.repo.id());
 
     if let Some(priority) = command.priority {
-        pr.default_priority = Some(priority);
+        db_pr.default_priority = Some(priority);
     }
 
-    let requested_reviewers: HashSet<i64> = HashSet::from_iter(context.pr.requested_reviewers.iter().map(|r| r.id.0 as i64));
+    let requested_reviewers: HashSet<i64> = HashSet::from_iter(pr.requested_reviewers.iter().map(|r| r.id.0 as i64));
 
-    let reviewers = context.repo.get_reviewers(context.pr.number).await?;
+    let reviewers = context.repo.get_reviewers(pr.number).await?;
     let mut reviewer_ids = Vec::new();
     for reviewer in reviewers {
         let Some(user) = reviewer.user else {
@@ -77,14 +88,14 @@ pub async fn handle<R: GitHubRepoClient>(
         }
     }
 
-    let pr = pr.upsert().get_result(conn).await?;
+    let db_pr = db_pr.upsert().get_result(conn).await?;
 
     // We should now start a CI Run for this PR.
-    let run = CiRun::insert(context.repo.id(), context.pr.number)
-        .base_ref(Base::from_pr(&context.pr))
-        .head_commit_sha(context.pr.head.sha.as_str().into())
-        .ci_branch(context.repo.config().merge_branch(&context.pr.base.ref_field).into())
-        .maybe_priority(command.priority.or(pr.default_priority))
+    let run = CiRun::insert(context.repo.id(), pr.number)
+        .base_ref(Base::from_pr(&pr))
+        .head_commit_sha(pr.head.sha.as_str().into())
+        .ci_branch(context.repo.config().merge_branch(&pr.base.ref_field).into())
+        .maybe_priority(command.priority.or(db_pr.default_priority))
         .requested_by_id(context.user.id.0 as i64)
         .approved_by_ids(reviewer_ids)
         .is_dry_run(false)
@@ -154,30 +165,7 @@ mod tests {
                     &mut conn,
                     BrawlCommandContext {
                         repo: &client,
-                        pr: PullRequest {
-                            number: 1,
-                            head: PrBranch {
-                                sha: "head_sha".to_string(),
-                                label: Some("head".to_string()),
-                                ref_field: "head".to_string(),
-                            },
-                            base: PrBranch {
-                                sha: "base_sha".to_string(),
-                                label: Some("base".to_string()),
-                                ref_field: "base".to_string(),
-                            },
-                            requested_reviewers: vec![
-                                User {
-                                    id: UserId(1),
-                                    login: "test".to_string(),
-                                },
-                                User {
-                                    id: UserId(2),
-                                    login: "test2".to_string(),
-                                },
-                            ],
-                            ..Default::default()
-                        },
+                        pr_number: 1,
                         user: User::default(),
                     },
                 )
@@ -186,6 +174,39 @@ mod tests {
 
             (conn, client)
         });
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::GetPullRequest { number, result } => {
+                assert_eq!(number, 1);
+                result
+                    .send(Ok(PullRequest {
+                        number: 1,
+                        head: PrBranch {
+                            sha: "head_sha".to_string(),
+                            label: Some("head".to_string()),
+                            ref_field: "head".to_string(),
+                        },
+                        base: PrBranch {
+                            sha: "base_sha".to_string(),
+                            label: Some("base".to_string()),
+                            ref_field: "base".to_string(),
+                        },
+                        requested_reviewers: vec![
+                            User {
+                                id: UserId(1),
+                                login: "test".to_string(),
+                            },
+                            User {
+                                id: UserId(2),
+                                login: "test2".to_string(),
+                            },
+                        ],
+                        ..Default::default()
+                    }))
+                    .unwrap();
+            }
+            r => panic!("unexpected action: {:?}", r),
+        }
 
         match rx.recv().await.unwrap() {
             MockRepoAction::HasPermission {
@@ -315,11 +336,12 @@ mod tests {
             .unwrap();
 
         let task = tokio::spawn(async move {
-            handle(
+            handle_with_pr(
                 &mut conn,
+                PullRequest::default(),
                 BrawlCommandContext {
                     repo: &client,
-                    pr: PullRequest::default(),
+                    pr_number: 0,
                     user: User::default(),
                 },
                 MergeCommand { priority: Some(100) },
@@ -363,14 +385,15 @@ mod tests {
 
         let (client, _) = MockRepoClient::new(mock.clone());
 
-        handle(
+        handle_with_pr(
             &mut conn,
+            PullRequest {
+                merged_at: Some(Utc::now()),
+                ..Default::default()
+            },
             BrawlCommandContext {
                 repo: &client,
-                pr: PullRequest {
-                    merged_at: Some(Utc::now()),
-                    ..Default::default()
-                },
+                pr_number: 0,
                 user: User::default(),
             },
             MergeCommand { priority: Some(100) },
@@ -390,11 +413,12 @@ mod tests {
         let (client, mut rx) = MockRepoClient::new(mock.clone());
 
         let task = tokio::spawn(async move {
-            handle(
+            handle_with_pr(
                 &mut conn,
+                PullRequest::default(),
                 BrawlCommandContext {
                     repo: &client,
-                    pr: PullRequest::default(),
+                    pr_number: 0,
                     user: User::default(),
                 },
                 MergeCommand { priority: Some(100) },
@@ -426,11 +450,12 @@ mod tests {
             ..Default::default()
         });
 
-        handle(
+        handle_with_pr(
             &mut conn,
+            PullRequest::default(),
             BrawlCommandContext {
                 repo: &client,
-                pr: PullRequest::default(),
+                pr_number: 0,
                 user: User::default(),
             },
             MergeCommand { priority: Some(100) },

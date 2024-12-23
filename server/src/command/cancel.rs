@@ -7,19 +7,29 @@ use crate::database::ci_run::CiRun;
 use crate::database::pr::Pr;
 use crate::github::merge_workflow::GitHubMergeWorkflow;
 use crate::github::messages;
+use crate::github::models::PullRequest;
 use crate::github::repo::GitHubRepoClient;
 
 pub async fn handle<R: GitHubRepoClient>(
     conn: &mut AsyncPgConnection,
     context: BrawlCommandContext<'_, R>,
 ) -> anyhow::Result<()> {
-    Pr::new(&context.pr, context.user.id, context.repo.id())
+    let pr = context.repo.get_pull_request(context.pr_number).await?;
+    handle_with_pr(conn, pr, context).await
+}
+
+async fn handle_with_pr<R: GitHubRepoClient>(
+    conn: &mut AsyncPgConnection,
+    pr: PullRequest,
+    context: BrawlCommandContext<'_, R>,
+) -> anyhow::Result<()> {
+    Pr::new(&pr, context.user.id, context.repo.id())
         .upsert()
         .get_result(conn)
         .await
         .context("update pr")?;
 
-    if let Some(run) = CiRun::active(context.repo.id(), context.pr.number)
+    if let Some(run) = CiRun::active(context.repo.id(), pr.number)
         .get_result(conn)
         .await
         .optional()
@@ -45,7 +55,7 @@ pub async fn handle<R: GitHubRepoClient>(
 
         context
             .repo
-            .send_message(context.pr.number, &messages::error_no_body("Cancelled CI run"))
+            .send_message(pr.number, &messages::error_no_body("Cancelled CI run"))
             .await?;
     }
 
@@ -143,7 +153,7 @@ pub mod tests {
                     &mut conn,
                     BrawlCommandContext {
                         repo: &client,
-                        pr,
+                        pr_number: 1,
                         user: User {
                             id: UserId(1),
                             login: "test".to_string(),
@@ -155,6 +165,19 @@ pub mod tests {
 
             (conn, client)
         });
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::GetPullRequest { number, result } => {
+                assert_eq!(number, 1);
+                result
+                    .send(Ok(PullRequest {
+                        number: 1,
+                        ..Default::default()
+                    }))
+                    .unwrap();
+            }
+            _ => panic!("unexpected action"),
+        }
 
         match rx.recv().await.unwrap() {
             MockRepoAction::HasPermission {
@@ -235,11 +258,12 @@ pub mod tests {
             .unwrap();
 
         let task = tokio::spawn(async move {
-            handle(
+            handle_with_pr(
                 &mut conn,
+                pr,
                 BrawlCommandContext {
                     repo: &client,
-                    pr,
+                    pr_number: 2,
                     user: User {
                         id: UserId(2),
                         login: "test".to_string(),
@@ -331,11 +355,12 @@ pub mod tests {
             .unwrap();
 
         let task = tokio::spawn(async move {
-            handle(
+            handle_with_pr(
                 &mut conn,
+                pr,
                 BrawlCommandContext {
                     repo: &client,
-                    pr,
+                    pr_number: 3,
                     user: User {
                         id: UserId(3),
                         login: "test".to_string(),
@@ -382,11 +407,12 @@ pub mod tests {
             ..Default::default()
         };
 
-        handle(
+        handle_with_pr(
             &mut conn,
+            pr,
             BrawlCommandContext {
                 repo: &client,
-                pr,
+                pr_number: 4,
                 user: User {
                     id: UserId(4),
                     login: "test".to_string(),

@@ -4,19 +4,12 @@ expression: event
 snapshot_kind: text
 ---
 [
-    PullRequest {
+    AddRepository {
         installation_id: InstallationId(
             58286822,
         ),
         repo_id: RepositoryId(
-            900225914,
+            907534783,
         ),
-        pr_number: 17,
-        user: User {
-            login: "TroyKomodo",
-            id: UserId(
-                49777269,
-            ),
-        },
     },
 ]

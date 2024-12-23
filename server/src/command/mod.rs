@@ -4,32 +4,28 @@ use diesel_async::AsyncPgConnection;
 use dry_run::DryRunCommand;
 use merge::MergeCommand;
 
-use crate::github::models::{PullRequest, User};
+use crate::github::models::User;
 use crate::github::repo::GitHubRepoClient;
 
 mod cancel;
 mod dry_run;
 mod merge;
 mod ping;
-mod pr;
 mod retry;
 
-pub use pr::PullRequestCommand;
-
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BrawlCommand {
     DryRun(DryRunCommand),
     Merge(MergeCommand),
     Retry,
     Cancel,
     Ping,
-    PullRequest(PullRequestCommand),
 }
 
 pub struct BrawlCommandContext<'a, R> {
     pub repo: &'a R,
     pub user: User,
-    pub pr: PullRequest,
+    pub pr_number: u64,
 }
 
 impl BrawlCommand {
@@ -44,7 +40,6 @@ impl BrawlCommand {
             BrawlCommand::Retry => retry::handle(conn, context).await,
             BrawlCommand::Cancel => cancel::handle(conn, context).await,
             BrawlCommand::Ping => ping::handle(conn, context).await,
-            BrawlCommand::PullRequest(command) => pr::handle(conn, context, command).await,
         }
     }
 }

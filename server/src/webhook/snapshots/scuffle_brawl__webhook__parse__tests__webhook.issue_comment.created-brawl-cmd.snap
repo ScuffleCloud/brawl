@@ -4,18 +4,24 @@ expression: event
 snapshot_kind: text
 ---
 [
-    PullRequest {
+    Command {
         installation_id: InstallationId(
             58286822,
         ),
-        repo_id: RepositoryId(
-            900225914,
+        command: DryRun(
+            DryRunCommand {
+                head_sha: None,
+                base_sha: None,
+            },
         ),
-        pr_number: 17,
+        repo_id: RepositoryId(
+            899726767,
+        ),
+        pr_number: 22,
         user: User {
-            login: "TroyKomodo",
+            login: "FrantaBOT",
             id: UserId(
-                49777269,
+                68978333,
             ),
         },
     },
