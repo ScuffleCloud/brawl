@@ -1,0 +1,28 @@
+---
+source: server/src/webhook/parse.rs
+expression: event
+snapshot_kind: text
+---
+[
+    Command {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        command: DryRun(
+            DryRunCommand {
+                head_sha: None,
+                base_sha: None,
+            },
+        ),
+        repo_id: RepositoryId(
+            899726767,
+        ),
+        pr_number: 22,
+        user: User {
+            login: "FrantaBOT",
+            id: UserId(
+                68978333,
+            ),
+        },
+    },
+]

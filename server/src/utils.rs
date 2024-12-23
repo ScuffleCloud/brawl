@@ -1,7 +1,18 @@
-pub fn commit_link(owner: &str, repo: &str, sha: &str) -> String {
-    format!("https://github.com/{}/{}/commit/{}", owner, repo, sha)
+/// Copied from the std because its currently nightly only
+pub fn format_fn<F>(f: F) -> FormatFn<F>
+where
+    F: Fn(&mut std::fmt::Formatter) -> std::fmt::Result,
+{
+    FormatFn(f)
 }
 
-pub fn issue_link(owner: &str, repo: &str, issue_number: u64) -> String {
-    format!("https://github.com/{}/{}/issues/{}", owner, repo, issue_number)
+pub struct FormatFn<F>(F);
+
+impl<F> std::fmt::Display for FormatFn<F>
+where
+    F: Fn(&mut std::fmt::Formatter) -> std::fmt::Result,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0(f)
+    }
 }

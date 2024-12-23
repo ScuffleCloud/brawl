@@ -1,0 +1,132 @@
+---
+source: server/src/webhook/parse.rs
+expression: event
+snapshot_kind: text
+---
+[
+    UpdateInstallation {
+        installation: Installation {
+            id: InstallationId(
+                58286822,
+            ),
+            account: User {
+                login: "ScuffleCloud",
+                id: UserId(
+                    122814584,
+                ),
+            },
+        },
+    },
+    RemoveRepository {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            594510762,
+        ),
+    },
+    RemoveRepository {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            601402669,
+        ),
+    },
+    RemoveRepository {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            603762274,
+        ),
+    },
+    RemoveRepository {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            662290744,
+        ),
+    },
+    RemoveRepository {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            717197574,
+        ),
+    },
+    RemoveRepository {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            717250048,
+        ),
+    },
+    RemoveRepository {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            732714209,
+        ),
+    },
+    RemoveRepository {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            736011967,
+        ),
+    },
+    RemoveRepository {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            736065746,
+        ),
+    },
+    RemoveRepository {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            736069632,
+        ),
+    },
+    RemoveRepository {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            743658750,
+        ),
+    },
+    RemoveRepository {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            744151610,
+        ),
+    },
+    RemoveRepository {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            897642912,
+        ),
+    },
+    RemoveRepository {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            899726767,
+        ),
+    },
+]

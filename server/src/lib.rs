@@ -1,4 +1,6 @@
+pub mod auto_start;
 pub mod command;
+pub mod database;
 pub mod github;
-pub mod schema;
-pub mod utils;
+mod utils;
+pub mod webhook;

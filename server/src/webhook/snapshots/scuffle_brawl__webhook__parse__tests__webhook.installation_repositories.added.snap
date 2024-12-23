@@ -1,0 +1,28 @@
+---
+source: server/src/webhook/parse.rs
+expression: event
+snapshot_kind: text
+---
+[
+    UpdateInstallation {
+        installation: Installation {
+            id: InstallationId(
+                58286822,
+            ),
+            account: User {
+                login: "ScuffleCloud",
+                id: UserId(
+                    122814584,
+                ),
+            },
+        },
+    },
+    AddRepository {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            900225914,
+        ),
+    },
+]

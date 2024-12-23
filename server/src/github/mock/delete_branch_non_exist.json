@@ -1,0 +1,5 @@
+{
+    "message": "Reference does not exist",
+    "documentation_url": "https://docs.github.com/rest/git/refs#delete-a-reference",
+    "status": "422"
+}

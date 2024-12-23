@@ -1,0 +1,21 @@
+{
+    "id": 34756421189,
+    "name": "audit",
+    "node_id": "CR_kwDOI2-Dqs8AAAAIF6TmRQ",
+    "head_sha": "c0580a621d824cc8097f88a76f47f6b313fcee99",
+    "external_id": "67049caa-ba6d-54b5-8d6c-ea858021b916",
+    "url": "https://api.github.com/repos/ScuffleCloud/scuffle/check-runs/34756421189",
+    "html_url": "https://github.com/ScuffleCloud/scuffle/actions/runs/12450045856/job/34756421189",
+    "details_url": "https://github.com/ScuffleCloud/scuffle/actions/runs/12450045856/job/34756421189",
+    "status": "completed",
+    "conclusion": "failure",
+    "started_at": "2024-12-22T01:24:48Z",
+    "completed_at": "2024-12-22T01:25:26Z",
+    "output": {
+        "title": null,
+        "summary": null,
+        "text": null,
+        "annotations_count": 1,
+        "annotations_url": "https://api.github.com/repos/ScuffleCloud/scuffle/check-runs/34756421189/annotations"
+    }
+}

@@ -62,8 +62,6 @@ jobs:
         with:
           toolchain: nightly
 
-      - uses: cargo-bins/cargo-binstall@main
-
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-hakari
@@ -76,9 +74,60 @@ jobs:
           cargo hakari generate --diff
           cargo hakari verify
 
+  schema-check:
+    name: Schema Check
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_USER: brawl
+          POSTGRES_PASSWORD: brawl
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgres://brawl:brawl@localhost:5432/brawl
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        id: setup-rust
+        with:
+          toolchain: nightly
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: diesel_cli,just
+
+      - name: Generate the schema
+        run: diesel database setup
+
+      - name: Check the schema is up-to-date
+        run: just diesel-check
+
   test:
     name: Test
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_USER: brawl
+          POSTGRES_PASSWORD: brawl
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgres://brawl:brawl@localhost:5432/brawl
     steps:
       - uses: actions/checkout@v4
 
@@ -93,22 +142,30 @@ jobs:
           prefix-key: "v0-rust-${{ steps.setup-rust.outputs.cachekey }}"
           shared-key: test
 
-      - uses: cargo-bins/cargo-binstall@main
-
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-nextest,cargo-llvm-cov
+          tool: cargo-nextest,cargo-llvm-cov,diesel_cli
+
+      - name: Setup database
+        run: diesel database setup
 
       # Note; we don't run the powerset here because it's very slow on CI
       # Perhaps we should consider it at some point.
       - name: Run tests
         run: cargo +nightly llvm-cov nextest --no-fail-fast --all-features --lcov --output-path ./lcov.info --profile ci
 
+      - name: PR Override
+        if: ${{ startsWith(github.ref, 'refs/heads/automation/brawl/try/') }}
+        run: |
+          PR_NUMBER=$(echo ${{ github.ref }} | sed -n 's/^refs\/heads\/automation\/brawl\/try\/\([0-9]*\)$/\1/p')
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_ENV
+
       - uses: codecov/codecov-action@v5
         with:
           fail_ci_if_error: true
           files: ./lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
+          override_pr: ${{ env.PR_NUMBER || github.event.pull_request.number || '' }}
           verbose: true
 
       - name: Upload test results to Codecov
@@ -116,11 +173,12 @@ jobs:
         uses: codecov/test-results-action@v1
         with:
           files: ./target/nextest/ci/junit.xml
+          override_pr: ${{ env.PR_NUMBER || github.event.pull_request.number || '' }}
           token: ${{ secrets.CODECOV_TOKEN }}
 
   brawl-done:
     runs-on: ubuntu-24.04
-    needs: [hakari, test, clippy, fmt]
+    needs: [schema-check, hakari, test, clippy, fmt]
     if: ${{ !cancelled() && (startsWith(github.ref, 'refs/heads/automation/brawl/merge/') || startsWith(github.ref, 'refs/heads/automation/brawl/try/')) }}
     steps:
       - name: calculate the correct exit status

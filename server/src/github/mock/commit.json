@@ -1,0 +1,106 @@
+{
+    "sha": "b788e73f95c7b81b552d42fac1380c4b84b70be9",
+    "node_id": "C_kwDONaC9r9oAKGI3ODhlNzNmOTVjN2I4MWI1NTJkNDJmYWMxMzgwYzRiODRiNzBiZTk",
+    "commit": {
+        "author": {
+            "name": "scuffle-brawl[bot]",
+            "email": "191062277+scuffle-brawl[bot]@users.noreply.github.com",
+            "date": "2024-12-20T21:15:38Z"
+        },
+        "committer": {
+            "name": "GitHub",
+            "email": "noreply@github.com",
+            "date": "2024-12-20T21:15:38Z"
+        },
+        "message": "Auto merge of https://github.com/ScuffleCloud/ci-testing/pull/22 - feature/1, r=lennartkloock\n\nadd fib\n<!--\nThank you for your Pull Request. Please provide a description above and review\nthe requirements below.\n\nBug fixes and new features should include tests.\n\nContributors guide: https://github.com/ScuffleTV/.github/blob/main/CONTRIBUTING.md\n-->\n\n## Motivation\n\n<!--\nExplain the context and why you're making that change. What is the problem\nyou're trying to solve? If a new feature is being added, describe the intended\nuse case that feature fulfills.\n-->\n\n## Solution\n\n<!--\nSummarize the solution and provide any necessary context needed to understand\nthe code change.\n-->\n\n## Tickets\n\n<!--\nLink any relevant tickets. Remember to not specify the ticket ids in the commit messages.\n-->\n\nRequested-by: TroyKomodo <49777269+TroyKomodo@users.noreply.github.com>\nReviewed-by: lennartkloock <39778085+lennartkloock@users.noreply.github.com>",
+        "tree": {
+            "sha": "588e42e273fae85aa8849056329787c878b2b0e7",
+            "url": "https://api.github.com/repos/ScuffleCloud/ci-testing/git/trees/588e42e273fae85aa8849056329787c878b2b0e7"
+        },
+        "url": "https://api.github.com/repos/ScuffleCloud/ci-testing/git/commits/b788e73f95c7b81b552d42fac1380c4b84b70be9",
+        "comment_count": 0,
+        "verification": {
+            "verified": true,
+            "reason": "valid",
+            "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJnZd56CRC1aQ7uu5UhlAAAZqcQAAvxVgcrNOdJ2+E6siL9MP/8\nkUGicLSMMd2ANjwDkOyzMl1xyK74TT3SHtyo0k4oSinzEpOZ3qHtXmFCx36SvNlu\nloZMy3rM8y4/kMd+RN6WJLDB+UUNBg72vAGwOovsDcOrj3pLLlMDL4XsnpZA9828\ngmsrSjFn1Ol+a10PAXBKo/4+VYXe7WjkNUCzkpDw3Zaj2sQUV7LVGOF2mgkQejpO\nL57cYUJaisJxw9mrm3o+kEPy3Ksnpn3g3OHQx2hwx0aqBTSV2irXH/mbtVt8lWdp\n8AQ5g+epUe1a01TOBLf6s3KpyMWWAWp0rqaeWVMs2vw/zAmvED94kILCNkryOUAa\n6ioV08U99VQwVTqgGoyz6wQ1ZHCRZqlL5sAk1UMDsfqcTYDuLV9eKkgHbAeok0Y4\nSTTTSb8vY7tdQnyzq7iMF/61t/JqGNfURKnGdEYR1E82zMpSwfYynUMzMi7crCj6\nwX4nLg5aLriGRuSGAGsYiC3O5a5AkZtKA7d9v89pVWAKA+HAoJm9t6Jam+5L4o9b\nKqBZu+x3jDd44E2RWMc4RBYyxtT3KQwkT3O1y7t8I7vSgz3nNwqhrG/AMp7TjZ01\nK8LFCsA3bqXAhkU1NE1uPvA453GmmwfwavpHyYYEx0bMHtl7cS3Eu/MXWM8IqBLa\nIYcc1LNYEK86SrdnhJ32\n=MBZf\n-----END PGP SIGNATURE-----\n",
+            "payload": "tree 588e42e273fae85aa8849056329787c878b2b0e7\nparent 7cb472a827cc492096a3ba6a6020fef5c5bbe800\nparent fe2e65c6ebd8b42cf98597dd5c978cca8d28773e\nauthor scuffle-brawl[bot] <191062277+scuffle-brawl[bot]@users.noreply.github.com> 1734729338 +0000\ncommitter GitHub <noreply@github.com> 1734729338 +0000\n\nAuto merge of https://github.com/ScuffleCloud/ci-testing/pull/22 - feature/1, r=lennartkloock\n\nadd fib\n<!--\nThank you for your Pull Request. Please provide a description above and review\nthe requirements below.\n\nBug fixes and new features should include tests.\n\nContributors guide: https://github.com/ScuffleTV/.github/blob/main/CONTRIBUTING.md\n-->\n\n## Motivation\n\n<!--\nExplain the context and why you're making that change. What is the problem\nyou're trying to solve? If a new feature is being added, describe the intended\nuse case that feature fulfills.\n-->\n\n## Solution\n\n<!--\nSummarize the solution and provide any necessary context needed to understand\nthe code change.\n-->\n\n## Tickets\n\n<!--\nLink any relevant tickets. Remember to not specify the ticket ids in the commit messages.\n-->\n\nRequested-by: TroyKomodo <49777269+TroyKomodo@users.noreply.github.com>\nReviewed-by: lennartkloock <39778085+lennartkloock@users.noreply.github.com>\n",
+            "verified_at": "2024-12-20T21:15:38Z"
+        }
+    },
+    "url": "https://api.github.com/repos/ScuffleCloud/ci-testing/commits/b788e73f95c7b81b552d42fac1380c4b84b70be9",
+    "html_url": "https://github.com/ScuffleCloud/ci-testing/commit/b788e73f95c7b81b552d42fac1380c4b84b70be9",
+    "comments_url": "https://api.github.com/repos/ScuffleCloud/ci-testing/commits/b788e73f95c7b81b552d42fac1380c4b84b70be9/comments",
+    "author": {
+        "login": "scuffle-brawl[bot]",
+        "id": 191062277,
+        "node_id": "BOT_kgDOC2NhBQ",
+        "avatar_url": "https://avatars.githubusercontent.com/in/1081680?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/scuffle-brawl%5Bbot%5D",
+        "html_url": "https://github.com/apps/scuffle-brawl",
+        "followers_url": "https://api.github.com/users/scuffle-brawl%5Bbot%5D/followers",
+        "following_url": "https://api.github.com/users/scuffle-brawl%5Bbot%5D/following{/other_user}",
+        "gists_url": "https://api.github.com/users/scuffle-brawl%5Bbot%5D/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/scuffle-brawl%5Bbot%5D/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/scuffle-brawl%5Bbot%5D/subscriptions",
+        "organizations_url": "https://api.github.com/users/scuffle-brawl%5Bbot%5D/orgs",
+        "repos_url": "https://api.github.com/users/scuffle-brawl%5Bbot%5D/repos",
+        "events_url": "https://api.github.com/users/scuffle-brawl%5Bbot%5D/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/scuffle-brawl%5Bbot%5D/received_events",
+        "type": "Bot",
+        "user_view_type": "public",
+        "site_admin": false
+    },
+    "committer": {
+        "login": "web-flow",
+        "id": 19864447,
+        "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+        "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/web-flow",
+        "html_url": "https://github.com/web-flow",
+        "followers_url": "https://api.github.com/users/web-flow/followers",
+        "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+        "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+        "organizations_url": "https://api.github.com/users/web-flow/orgs",
+        "repos_url": "https://api.github.com/users/web-flow/repos",
+        "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/web-flow/received_events",
+        "type": "User",
+        "user_view_type": "public",
+        "site_admin": false
+    },
+    "parents": [
+        {
+            "sha": "7cb472a827cc492096a3ba6a6020fef5c5bbe800",
+            "url": "https://api.github.com/repos/ScuffleCloud/ci-testing/commits/7cb472a827cc492096a3ba6a6020fef5c5bbe800",
+            "html_url": "https://github.com/ScuffleCloud/ci-testing/commit/7cb472a827cc492096a3ba6a6020fef5c5bbe800"
+        },
+        {
+            "sha": "fe2e65c6ebd8b42cf98597dd5c978cca8d28773e",
+            "url": "https://api.github.com/repos/ScuffleCloud/ci-testing/commits/fe2e65c6ebd8b42cf98597dd5c978cca8d28773e",
+            "html_url": "https://github.com/ScuffleCloud/ci-testing/commit/fe2e65c6ebd8b42cf98597dd5c978cca8d28773e"
+        }
+    ],
+    "stats": {
+        "total": 26,
+        "additions": 26,
+        "deletions": 0
+    },
+    "files": [
+        {
+            "sha": "053eb92e6e774aaa791186f655108b552c71a8c6",
+            "filename": "src/lib.rs",
+            "status": "modified",
+            "additions": 26,
+            "deletions": 0,
+            "changes": 26,
+            "blob_url": "https://github.com/ScuffleCloud/ci-testing/blob/b788e73f95c7b81b552d42fac1380c4b84b70be9/src%2Flib.rs",
+            "raw_url": "https://github.com/ScuffleCloud/ci-testing/raw/b788e73f95c7b81b552d42fac1380c4b84b70be9/src%2Flib.rs",
+            "contents_url": "https://api.github.com/repos/ScuffleCloud/ci-testing/contents/src%2Flib.rs?ref=b788e73f95c7b81b552d42fac1380c4b84b70be9",
+            "patch": "@@ -6,6 +6,18 @@ pub mod i32 {\n     pub fn mul(a: i32, b: i32) -> i32 {\n         a * b\n     }\n+\n+    pub fn sub(a: i32, b: i32) -> i32 {\n+        a - b\n+    }\n+\n+    pub fn fib(n: i32) -> i32 {\n+        if n == 0 || n == 1 {\n+            return n;\n+        }\n+\n+        add(fib(sub(n, 1)), fib(sub(n, 2)))\n+    }\n }\n \n pub mod f64 {\n@@ -41,4 +53,18 @@ mod tests {\n     fn test_mul_f64() {\n         assert_eq!(f64::mul(2.0, 3.0), 6.0);\n     }\n+\n+    #[test]\n+    fn test_fib() {\n+        assert_eq!(i32::fib(0), 0);\n+        assert_eq!(i32::fib(1), 1);\n+        assert_eq!(i32::fib(2), 1);\n+        assert_eq!(i32::fib(3), 2);\n+        assert_eq!(i32::fib(4), 3);\n+    }\n+\n+    #[test]\n+    fn test_sub() {\n+        assert_eq!(i32::sub(1, 2), -1);\n+    }\n }"
+        }
+    ]
+}

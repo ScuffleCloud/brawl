@@ -1,0 +1,15 @@
+---
+source: server/src/webhook/parse.rs
+expression: event
+snapshot_kind: text
+---
+[
+    RemoveRepository {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            907533428,
+        ),
+    },
+]

@@ -1,0 +1,10 @@
+{
+    "ref": "refs/heads/test/queue",
+    "node_id": "REF_kwDONaC9r7VyZWZzL2hlYWRzL3Rlc3QvcXVldWU",
+    "url": "https://api.github.com/repos/ScuffleCloud/ci-testing/git/refs/heads/test/queue",
+    "object": {
+        "sha": "b7f8cd1bd474d5be1802377c9a0baea5eb59fcb7",
+        "type": "commit",
+        "url": "https://api.github.com/repos/ScuffleCloud/ci-testing/git/commits/b7f8cd1bd474d5be1802377c9a0baea5eb59fcb7"
+    }
+}

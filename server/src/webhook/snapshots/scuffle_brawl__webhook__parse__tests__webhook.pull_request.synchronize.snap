@@ -1,0 +1,22 @@
+---
+source: server/src/webhook/parse.rs
+expression: event
+snapshot_kind: text
+---
+[
+    PullRequest {
+        installation_id: InstallationId(
+            58286822,
+        ),
+        repo_id: RepositoryId(
+            900225914,
+        ),
+        pr_number: 17,
+        user: User {
+            login: "TroyKomodo",
+            id: UserId(
+                49777269,
+            ),
+        },
+    },
+]
