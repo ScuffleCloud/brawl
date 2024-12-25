@@ -832,7 +832,7 @@ mod tests {
             latest_commit_sha: "latest_commit_sha".into(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
-            added_label: None,
+            added_labels: vec![],
         };
 
         diesel::insert_into(crate::database::schema::github_pr::table)

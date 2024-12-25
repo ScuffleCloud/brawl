@@ -91,23 +91,54 @@ impl GitHubBrawlRepoConfig {
 #[serde(default)]
 pub struct GitHubBrawlLabelsConfig {
     /// The label to attach to PRs when they are in the merge queue
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub on_merge_queued: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "string_or_vec")]
+    pub on_merge_queued: Vec<String>,
     /// The label to attach to PRs when they are being merged
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub on_merge_in_progress: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "string_or_vec")]
+    pub on_merge_in_progress: Vec<String>,
     /// The label to attach to PRs when they fail to merge
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub on_merge_failure: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "string_or_vec")]
+    pub on_merge_failure: Vec<String>,
     /// The label to attach to PRs when they are merged
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub on_merge_success: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "string_or_vec")]
+    pub on_merge_success: Vec<String>,
     /// The label to attach to PRs when they are being tried
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub on_try_in_progress: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "string_or_vec")]
+    pub on_try_in_progress: Vec<String>,
     /// The label to attach to PRs when they fail to try
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub on_try_failure: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "string_or_vec")]
+    pub on_try_failure: Vec<String>,
+}
+
+fn string_or_vec<'de, D: Deserializer<'de>>(s: D) -> Result<Vec<String>, D::Error> {
+    use serde::de::SeqAccess;
+
+    struct StringOrVecVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for StringOrVecVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a string or a vector of strings")
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E> {
+            Ok(vec![v.to_string()])
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut vec = Vec::new();
+            while let Some(value) = seq.next_element()? {
+                vec.push(value);
+            }
+            Ok(vec)
+        }
+    }
+
+    s.deserialize_any(StringOrVecVisitor)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -325,10 +356,10 @@ mod tests {
 
         [labels]
         on_merge_queued = "merge-queued"
-        on_merge_in_progress = "merge-in-progress"
+        on_merge_in_progress = ["merge-in-progress", "waiting-on-brawl"]
         on_merge_failure = "merge-failed"
         on_merge_success = "merge-success"
-        on_try_in_progress = "try-in-progress"
+        on_try_in_progress = ["try-in-progress", "waiting-on-brawl"]
         on_try_failure = "try-failed"
         "#;
 
@@ -342,12 +373,18 @@ mod tests {
         assert_eq!(config.required_status_checks, vec!["brawl-done"]);
         assert_eq!(config.timeout_minutes, 60);
         assert_eq!(config.max_reviewers, 10);
-        assert_eq!(config.labels.on_merge_queued, Some("merge-queued".to_string()));
-        assert_eq!(config.labels.on_merge_in_progress, Some("merge-in-progress".to_string()));
-        assert_eq!(config.labels.on_merge_failure, Some("merge-failed".to_string()));
-        assert_eq!(config.labels.on_merge_success, Some("merge-success".to_string()));
-        assert_eq!(config.labels.on_try_in_progress, Some("try-in-progress".to_string()));
-        assert_eq!(config.labels.on_try_failure, Some("try-failed".to_string()));
+        assert_eq!(config.labels.on_merge_queued, vec!["merge-queued".to_string()]);
+        assert_eq!(
+            config.labels.on_merge_in_progress,
+            vec!["merge-in-progress".to_string(), "waiting-on-brawl".to_string()]
+        );
+        assert_eq!(config.labels.on_merge_failure, vec!["merge-failed".to_string()]);
+        assert_eq!(config.labels.on_merge_success, vec!["merge-success".to_string()]);
+        assert_eq!(
+            config.labels.on_try_in_progress,
+            vec!["try-in-progress".to_string(), "waiting-on-brawl".to_string()]
+        );
+        assert_eq!(config.labels.on_try_failure, vec!["try-failed".to_string()]);
     }
 
     #[test]

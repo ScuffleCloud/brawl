@@ -30,7 +30,7 @@ pub struct Pr<'a> {
     pub target_branch: Cow<'a, str>,
     pub source_branch: Cow<'a, str>,
     pub latest_commit_sha: Cow<'a, str>,
-    pub added_label: Option<Cow<'a, str>>,
+    pub added_labels: Vec<Cow<'a, str>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -43,7 +43,7 @@ pub struct UpdatePr<'a> {
     pub github_repo_id: i64,
     #[builder(start_fn)]
     pub github_pr_number: i32,
-    pub added_label: Option<Option<Cow<'a, str>>>,
+    pub added_labels: Option<Vec<Cow<'a, str>>>,
     pub title: Option<Cow<'a, str>>,
     pub body: Option<Cow<'a, str>>,
     pub merge_status: Option<GithubPrMergeStatus>,
@@ -112,7 +112,7 @@ impl<'a> Pr<'a> {
             target_branch: Cow::Borrowed(&pr.base.ref_field),
             source_branch: Cow::Borrowed(&pr.head.ref_field),
             latest_commit_sha: Cow::Borrowed(&pr.head.sha),
-            added_label: None,
+            added_labels: Vec::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }
@@ -141,7 +141,7 @@ impl<'a> Pr<'a> {
                 title: Some(Cow::Borrowed(self.title.as_ref())),
                 body: Some(Cow::Borrowed(self.body.as_ref())),
                 merge_status: Some(self.merge_status),
-                added_label: Some(self.added_label.as_deref().map(Cow::Borrowed)),
+                added_labels: Some(self.added_labels.clone()),
                 assigned_ids: Some(self.assigned_ids.clone()),
                 status: Some(self.status),
                 default_priority: Some(self.default_priority),
@@ -268,7 +268,7 @@ mod tests {
             latest_commit_sha: Cow::Borrowed("test"),
             source_branch: Cow::Borrowed("test"),
             target_branch: Cow::Borrowed("test"),
-            added_label: None,
+            added_labels: vec![],
             merge_status: GithubPrMergeStatus::NotReady,
             status: GithubPrStatus::Open,
             merge_commit_sha: None,
@@ -368,7 +368,7 @@ mod tests {
             updated_at: chrono::DateTime::from_timestamp_nanos(1718851200000000000),
             assigned_ids: vec![],
             author_id: 0,
-            added_label: None,
+            added_labels: vec![],
             default_priority: None,
             latest_commit_sha: Cow::Borrowed("test"),
             source_branch: Cow::Borrowed("test"),
@@ -529,7 +529,7 @@ mod tests {
             title: Cow::Borrowed("test"),
             assigned_ids: vec![],
             author_id: 0,
-            added_label: None,
+            added_labels: vec![],
             default_priority: None,
             merge_status: GithubPrMergeStatus::NotReady,
             status: GithubPrStatus::Open,
@@ -561,7 +561,7 @@ mod tests {
             assigned_ids: vec![],
             author_id: 0,
             default_priority: None,
-            added_label: None,
+            added_labels: vec![],
             merge_status: GithubPrMergeStatus::NotReady,
             status: GithubPrStatus::Open,
             merge_commit_sha: None,
@@ -599,7 +599,7 @@ mod tests {
             title: Cow::Borrowed("test"),
             assigned_ids: vec![],
             author_id: 0,
-            added_label: None,
+            added_labels: vec![],
             default_priority: None,
             merge_status: GithubPrMergeStatus::NotReady,
             status: GithubPrStatus::Open,
@@ -690,7 +690,7 @@ mod tests {
         .unwrap();
 
         pr.update()
-            .body("test2".into())
+            .body(Cow::Borrowed("test2"))
             .build()
             .query()
             .execute(&mut conn)
