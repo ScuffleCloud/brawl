@@ -240,7 +240,7 @@ mod tests {
       "github_pr"."target_branch",
       "github_pr"."source_branch",
       "github_pr"."latest_commit_sha",
-      "github_pr"."added_label",
+      "github_pr"."added_labels",
       "github_pr"."created_at",
       "github_pr"."updated_at"
     FROM
@@ -289,7 +289,7 @@ mod tests {
         "target_branch",
         "source_branch",
         "latest_commit_sha",
-        "added_label",
+        "added_labels",
         "created_at",
         "updated_at"
       )
@@ -308,10 +308,10 @@ mod tests {
         $9,
         $10,
         $11,
-        DEFAULT,
         $12,
-        $13
-      ) -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z]
+        $13,
+        $14
+      ) -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", [], 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z]
     "#,
     }
 
@@ -393,7 +393,7 @@ mod tests {
         "target_branch",
         "source_branch",
         "latest_commit_sha",
-        "added_label",
+        "added_labels",
         "created_at",
         "updated_at"
       )
@@ -412,23 +412,23 @@ mod tests {
         $9,
         $10,
         $11,
-        DEFAULT,
         $12,
-        $13
+        $13,
+        $14
       ) ON CONFLICT ("github_repo_id", "github_pr_number") DO
     UPDATE
     SET
-      "added_label" = $14,
-      "title" = $15,
-      "body" = $16,
-      "merge_status" = $17,
-      "assigned_ids" = $18,
-      "status" = $19,
-      "default_priority" = $20,
-      "merge_commit_sha" = $21,
-      "target_branch" = $22,
-      "latest_commit_sha" = $23,
-      "updated_at" = $24
+      "added_labels" = $15,
+      "title" = $16,
+      "body" = $17,
+      "merge_status" = $18,
+      "assigned_ids" = $19,
+      "status" = $20,
+      "default_priority" = $21,
+      "merge_commit_sha" = $22,
+      "target_branch" = $23,
+      "latest_commit_sha" = $24,
+      "updated_at" = $25
     RETURNING
       "github_pr"."github_repo_id",
       "github_pr"."github_pr_number",
@@ -443,9 +443,9 @@ mod tests {
       "github_pr"."target_branch",
       "github_pr"."source_branch",
       "github_pr"."latest_commit_sha",
-      "github_pr"."added_label",
+      "github_pr"."added_labels",
       "github_pr"."created_at",
-      "github_pr"."updated_at" -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z, None, "test", "test", NotReady, [], Open, None, None, "test", "test", 2024-06-20T02:40:00Z]
+      "github_pr"."updated_at" -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", [], 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z, [], "test", "test", NotReady, [], Open, None, None, "test", "test", 2024-06-20T02:40:00Z]
     "#,
     }
 

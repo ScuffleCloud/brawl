@@ -1,3 +1,4 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(all(coverage_nightly, test), coverage(off))]
 
 use std::net::SocketAddr;
