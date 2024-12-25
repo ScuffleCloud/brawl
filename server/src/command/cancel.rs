@@ -23,7 +23,7 @@ async fn handle_with_pr<R: GitHubRepoClient>(
     pr: PullRequest,
     context: BrawlCommandContext<'_, R>,
 ) -> anyhow::Result<()> {
-    Pr::new(&pr, context.user.id, context.repo.id())
+    let db_pr = Pr::new(&pr, context.user.id, context.repo.id())
         .upsert()
         .get_result(conn)
         .await
@@ -49,7 +49,7 @@ async fn handle_with_pr<R: GitHubRepoClient>(
         context
             .repo
             .merge_workflow()
-            .cancel(&run, context.repo, conn)
+            .cancel(&run, context.repo, conn, &db_pr)
             .await
             .context("cancel ci run")?;
 
@@ -89,8 +89,9 @@ pub mod tests {
             run: &CiRun<'_>,
             repo: &impl GitHubRepoClient,
             conn: &mut AsyncPgConnection,
+            pr: &Pr<'_>,
         ) -> anyhow::Result<()> {
-            let _ = (run, repo, conn);
+            let _ = (run, repo, conn, pr);
             if self
                 .cancelled
                 .compare_exchange(

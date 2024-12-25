@@ -80,6 +80,12 @@ async fn handle_with_pr<R: GitHubRepoClient>(
 
     let branch = context.repo.config().try_branch(pr.number);
 
+    let db_pr = Pr::new(&pr, context.user.id, context.repo.id())
+        .upsert()
+        .get_result(conn)
+        .await
+        .context("update pr")?;
+
     if let Some(run) = CiRun::active(context.repo.id(), pr.number)
         .get_result(conn)
         .await
@@ -90,7 +96,7 @@ async fn handle_with_pr<R: GitHubRepoClient>(
             context
                 .repo
                 .merge_workflow()
-                .cancel(&run, context.repo, conn)
+                .cancel(&run, context.repo, conn, &db_pr)
                 .await
                 .context("cancel ci run")?;
         } else {
@@ -114,12 +120,6 @@ async fn handle_with_pr<R: GitHubRepoClient>(
             return Ok(());
         }
     }
-
-    let db_pr = Pr::new(&pr, context.user.id, context.repo.id())
-        .upsert()
-        .get_result(conn)
-        .await
-        .context("update pr")?;
 
     let run = CiRun::insert(context.repo.id(), pr.number)
         .base_ref(base)
@@ -199,6 +199,7 @@ mod tests {
             run: &CiRun<'_>,
             _: &impl GitHubRepoClient,
             conn: &mut AsyncPgConnection,
+            _: &Pr<'_>,
         ) -> anyhow::Result<()> {
             if self
                 .cancelled

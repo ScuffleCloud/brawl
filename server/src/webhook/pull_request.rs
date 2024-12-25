@@ -45,7 +45,7 @@ pub async fn handle_with_pr<R: GitHubRepoClient>(
 
             match run {
                 Some(run) if !run.is_dry_run => {
-                    repo.merge_workflow().cancel(&run, repo, conn).await?;
+                    repo.merge_workflow().cancel(&run, repo, conn, &current).await?;
                     repo.send_message(
                         run.github_pr_number as u64,
                         &messages::error_no_body(format!(
@@ -99,6 +99,7 @@ mod tests {
             run: &CiRun<'_>,
             _: &impl GitHubRepoClient,
             conn: &mut AsyncPgConnection,
+            _: &Pr<'_>,
         ) -> anyhow::Result<()> {
             self.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
 

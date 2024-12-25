@@ -13,6 +13,7 @@ use crate::database::ci_run::{Base, CiRun};
 use crate::database::ci_run_check::CiCheck;
 use crate::database::enums::{GithubCiRunStatus, GithubCiRunStatusCheckStatus};
 use crate::database::pr::Pr;
+use crate::github::label_state::update_labels;
 use crate::github::repo::MergeResult;
 use crate::utils::format_fn;
 
@@ -96,8 +97,9 @@ pub trait GitHubMergeWorkflow: Send + Sync {
         run: &CiRun<'_>,
         repo: &impl GitHubRepoClient,
         conn: &mut AsyncPgConnection,
+        pr: &Pr<'_>,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
-        let _ = (run, repo, conn);
+        let _ = (run, repo, conn, pr);
         unimplemented!("GitHubMergeWorkflow::cancel");
         #[allow(unreachable_code)]
         std::future::pending()
@@ -108,8 +110,10 @@ pub trait GitHubMergeWorkflow: Send + Sync {
         &self,
         run: &CiRun<'_>,
         repo: &impl GitHubRepoClient,
+        conn: &mut AsyncPgConnection,
+        pr: &Pr<'_>,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
-        let _ = (run, repo);
+        let _ = (run, repo, conn, pr);
         unimplemented!("GitHubMergeWorkflow::queued");
         #[allow(unreachable_code)]
         std::future::pending()
@@ -148,8 +152,9 @@ impl<T: GitHubMergeWorkflow> GitHubMergeWorkflow for &T {
         run: &CiRun<'_>,
         repo: &impl GitHubRepoClient,
         conn: &mut AsyncPgConnection,
+        pr: &Pr<'_>,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
-        (*self).cancel(run, repo, conn)
+        (*self).cancel(run, repo, conn, pr)
     }
 
     #[cfg_attr(all(test, coverage_nightly), coverage(off))]
@@ -157,8 +162,10 @@ impl<T: GitHubMergeWorkflow> GitHubMergeWorkflow for &T {
         &self,
         run: &CiRun<'_>,
         repo: &impl GitHubRepoClient,
+        conn: &mut AsyncPgConnection,
+        pr: &Pr<'_>,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
-        (*self).queued(run, repo)
+        (*self).queued(run, repo, conn, pr)
     }
 
     #[cfg_attr(all(test, coverage_nightly), coverage(off))]
@@ -179,9 +186,9 @@ impl DefaultMergeWorkflow {
     async fn fail(
         &self,
         run: &CiRun<'_>,
+        pr: &Pr<'_>,
         repo: &impl GitHubRepoClient,
         conn: &mut AsyncPgConnection,
-        pr_number: i32,
         message: impl Borrow<IssueMessage>,
     ) -> anyhow::Result<()> {
         if CiRun::update(run.id)
@@ -197,7 +204,7 @@ impl DefaultMergeWorkflow {
             anyhow::bail!("run already completed");
         }
 
-        repo.send_message(pr_number as u64, message.borrow())
+        repo.send_message(pr.github_pr_number as u64, message.borrow())
             .await
             .context("send message")?;
 
@@ -214,6 +221,8 @@ impl DefaultMergeWorkflow {
 
         repo.delete_branch(&run.ci_branch).await?;
 
+        update_labels(conn, pr, GithubCiRunStatus::Failure, run.is_dry_run, repo).await?;
+
         Ok(())
     }
 
@@ -225,8 +234,6 @@ impl DefaultMergeWorkflow {
         pr: &Pr<'_>,
         checks: &[&CiCheck<'_>],
     ) -> anyhow::Result<()> {
-        println!("success");
-
         if CiRun::update(run.id)
             .status(GithubCiRunStatus::Success)
             .completed_at(chrono::Utc::now())
@@ -292,9 +299,9 @@ impl DefaultMergeWorkflow {
                 Err(e) => {
                     self.fail(
                         run,
+                        pr,
                         repo,
                         conn,
-                        run.github_pr_number,
                         &messages::error(
                             format_fn(|f| writeln!(f, "Tests passed but failed to push to branch {}", pr.target_branch)),
                             e,
@@ -331,6 +338,8 @@ impl DefaultMergeWorkflow {
                 );
             }
         }
+
+        update_labels(conn, pr, GithubCiRunStatus::Success, run.is_dry_run, repo).await?;
 
         Ok(())
     }
@@ -374,9 +383,9 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
             if check.status_check_status == GithubCiRunStatusCheckStatus::Failure {
                 self.fail(
                     run,
+                    pr,
                     repo,
                     conn,
-                    run.github_pr_number,
                     &messages::tests_failed(&check.status_check_name, &check.url),
                 )
                 .await?;
@@ -396,9 +405,9 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
         {
             self.fail(
                 run,
+                pr,
                 repo,
                 conn,
-                run.github_pr_number,
                 &messages::tests_timeout(
                     repo.config().timeout_minutes,
                     format_fn(|f| {
@@ -437,9 +446,9 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
                 let Some(branch) = repo.get_ref_latest_commit(&Reference::Branch(branch.to_string())).await? else {
                     self.fail(
                         run,
+                        pr,
                         repo,
                         conn,
-                        run.github_pr_number,
                         &messages::error(
                             format_fn(|f| {
                                 writeln!(f, "Failed to find branch {branch}")
@@ -500,9 +509,9 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
             Ok(MergeResult::Conflict) => {
                 self.fail(
                     run,
+                    pr,
                     repo,
                     conn,
-                    run.github_pr_number,
                     messages::merge_conflict(
                         &pr.source_branch,
                         &pr.target_branch,
@@ -517,9 +526,9 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
             Err(e) => {
                 self.fail(
                     run,
+                    pr,
                     repo,
                     conn,
-                    run.github_pr_number,
                     &messages::error(format_fn(|f| write!(f, "Failed to create merge commit")), e),
                 )
                 .await?;
@@ -541,9 +550,9 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
             Err(e) => {
                 self.fail(
                     run,
+                    pr,
                     repo,
                     conn,
-                    run.github_pr_number,
                     &messages::error(
                         format_fn(|f| write!(f, "Failed to push branch {branch}", branch = run.ci_branch)),
                         e,
@@ -572,6 +581,8 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
             "ci run started",
         );
 
+        update_labels(conn, pr, GithubCiRunStatus::InProgress, run.is_dry_run, repo).await?;
+
         Ok(true)
     }
 
@@ -580,6 +591,7 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
         run: &CiRun<'_>,
         repo: &impl GitHubRepoClient,
         conn: &mut AsyncPgConnection,
+        pr: &Pr<'_>,
     ) -> anyhow::Result<()> {
         if CiRun::update(run.id)
             .status(GithubCiRunStatus::Cancelled)
@@ -651,10 +663,18 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
             repo.delete_branch(&run.ci_branch).await?;
         }
 
+        update_labels(conn, pr, GithubCiRunStatus::Cancelled, run.is_dry_run, repo).await?;
+
         Ok(())
     }
 
-    async fn queued(&self, run: &CiRun<'_>, repo: &impl GitHubRepoClient) -> anyhow::Result<()> {
+    async fn queued(
+        &self,
+        run: &CiRun<'_>,
+        repo: &impl GitHubRepoClient,
+        conn: &mut AsyncPgConnection,
+        pr: &Pr<'_>,
+    ) -> anyhow::Result<()> {
         let requested_by = repo.get_user(UserId(run.requested_by_id as u64)).await?;
 
         repo.send_message(
@@ -669,6 +689,8 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
             ),
         )
         .await?;
+
+        update_labels(conn, pr, GithubCiRunStatus::Queued, run.is_dry_run, repo).await?;
 
         Ok(())
     }
@@ -810,6 +832,7 @@ mod tests {
             latest_commit_sha: "latest_commit_sha".into(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            added_label: None,
         };
 
         diesel::insert_into(crate::database::schema::github_pr::table)
@@ -2191,7 +2214,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ci_queued() {
-        let (_, client, _, run, mut rx) = ci_run_test_boilerplate(
+        let (mut conn, client, pr, run, mut rx) = ci_run_test_boilerplate(
             InsertCiRun::builder(1, 1)
                 .base_ref(Base::Commit(Cow::Borrowed("sha")))
                 .head_commit_sha(Cow::Borrowed("head_commit_sha"))
@@ -2204,7 +2227,7 @@ mod tests {
         .await;
 
         let task = tokio::spawn(async move {
-            DefaultMergeWorkflow.queued(&run, &client).await.unwrap();
+            DefaultMergeWorkflow.queued(&run, &client, &mut conn, &pr).await.unwrap();
         });
 
         match rx.recv().await.unwrap() {
@@ -2257,7 +2280,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ci_run_cancel_not_started() {
-        let (mut conn, client, _, run, _) = ci_run_test_boilerplate(
+        let (mut conn, client, pr, run, _) = ci_run_test_boilerplate(
             InsertCiRun::builder(1, 1)
                 .base_ref(Base::Commit(Cow::Borrowed("sha")))
                 .head_commit_sha(Cow::Borrowed("head_commit_sha"))
@@ -2270,7 +2293,7 @@ mod tests {
         .await;
 
         let task = tokio::spawn(async move {
-            client.merge_workflow().cancel(&run, &client, &mut conn).await.unwrap();
+            client.merge_workflow().cancel(&run, &client, &mut conn, &pr).await.unwrap();
 
             conn
         });
@@ -2286,7 +2309,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ci_run_cancel_started() {
-        let (mut conn, client, _, run, mut rx) = ci_run_test_boilerplate(
+        let (mut conn, client, pr, run, mut rx) = ci_run_test_boilerplate(
             InsertCiRun::builder(1, 1)
                 .base_ref(Base::Commit(Cow::Borrowed("sha")))
                 .head_commit_sha(Cow::Borrowed("head_commit_sha"))
@@ -2311,7 +2334,7 @@ mod tests {
         let run = CiRun::latest(RepositoryId(1), 1).get_result(&mut conn).await.unwrap();
 
         let task = tokio::spawn(async move {
-            client.merge_workflow().cancel(&run, &client, &mut conn).await.unwrap();
+            client.merge_workflow().cancel(&run, &client, &mut conn, &pr).await.unwrap();
 
             conn
         });

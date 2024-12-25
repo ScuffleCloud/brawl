@@ -15,7 +15,7 @@ use super::config::{GitHubBrawlRepoConfig, Permission, Role};
 use super::installation::UserCache;
 use super::merge_workflow::{DefaultMergeWorkflow, GitHubMergeWorkflow};
 use super::messages::{CommitMessage, IssueMessage};
-use super::models::{Commit, PullRequest, Repository, Review, User};
+use super::models::{Commit, Label, PullRequest, Repository, Review, User};
 
 pub struct RepoClient<W = DefaultMergeWorkflow> {
     pub(super) repo: ArcSwap<Repository>,
@@ -126,6 +126,20 @@ pub trait GitHubRepoClient: Send + Sync {
 
     /// Delete a branch from the repository
     fn delete_branch(&self, branch: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+
+    /// Add labels to a pull request
+    fn add_labels(
+        &self,
+        issue_number: u64,
+        labels: &[String],
+    ) -> impl std::future::Future<Output = anyhow::Result<Vec<Label>>> + Send;
+
+    /// Remove a label from a pull request
+    fn remove_label(
+        &self,
+        issue_number: u64,
+        labels: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<Vec<Label>>> + Send;
 
     /// Check if a user has a permission
     fn has_permission(
@@ -353,6 +367,24 @@ impl<W: GitHubMergeWorkflow> GitHubRepoClient for RepoClient<W> {
         }
     }
 
+    async fn add_labels(&self, issue_number: u64, labels: &[String]) -> anyhow::Result<Vec<Label>> {
+        self.client
+            .issues_by_id(self.id())
+            .add_labels(issue_number, labels)
+            .await
+            .context("add labels")
+            .map(|labels| labels.into_iter().map(Label::from).collect())
+    }
+
+    async fn remove_label(&self, issue_number: u64, label: &str) -> anyhow::Result<Vec<Label>> {
+        self.client
+            .issues_by_id(self.id())
+            .remove_label(issue_number, label)
+            .await
+            .context("remove label")
+            .map(|labels| labels.into_iter().map(Label::from).collect())
+    }
+
     async fn get_commit(&self, sha: &str) -> anyhow::Result<Option<Commit>> {
         match self
             .client
@@ -552,6 +584,16 @@ pub mod test_utils {
             permissions: Vec<Permission>,
             result: tokio::sync::oneshot::Sender<anyhow::Result<bool>>,
         },
+        AddLabels {
+            issue_number: u64,
+            labels: Vec<String>,
+            result: tokio::sync::oneshot::Sender<anyhow::Result<Vec<Label>>>,
+        },
+        RemoveLabel {
+            issue_number: u64,
+            label: String,
+            result: tokio::sync::oneshot::Sender<anyhow::Result<Vec<Label>>>,
+        },
     }
 
     impl<T: GitHubMergeWorkflow> GitHubRepoClient for MockRepoClient<T> {
@@ -723,6 +765,32 @@ pub mod test_utils {
                 .await
                 .expect("send has permission");
             rx.await.expect("recv has permission")
+        }
+
+        async fn add_labels(&self, issue_number: u64, labels: &[String]) -> anyhow::Result<Vec<Label>> {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            self.actions
+                .send(MockRepoAction::AddLabels {
+                    issue_number,
+                    labels: labels.to_vec(),
+                    result: tx,
+                })
+                .await
+                .expect("send add labels");
+            rx.await.expect("recv add labels")
+        }
+
+        async fn remove_label(&self, issue_number: u64, label: &str) -> anyhow::Result<Vec<Label>> {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            self.actions
+                .send(MockRepoAction::RemoveLabel {
+                    issue_number,
+                    label: label.to_owned(),
+                    result: tx,
+                })
+                .await
+                .expect("send remove label");
+            rx.await.expect("recv remove label")
         }
     }
 }
