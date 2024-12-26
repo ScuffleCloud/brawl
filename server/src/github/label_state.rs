@@ -137,7 +137,10 @@ mod tests {
     use octocrab::models::{RepositoryId, UserId};
 
     use super::*;
-    use crate::{database::get_test_connection, github::{merge_workflow::DefaultMergeWorkflow, models::{Label, PullRequest}, repo::test_utils::{MockRepoAction, MockRepoClient}}};
+    use crate::database::get_test_connection;
+    use crate::github::merge_workflow::DefaultMergeWorkflow;
+    use crate::github::models::{Label, PullRequest};
+    use crate::github::repo::test_utils::{MockRepoAction, MockRepoClient};
 
     #[test]
     fn test_desired_labels() {
@@ -225,10 +228,13 @@ mod tests {
         let mut conn = get_test_connection().await;
         let pr = PullRequest::default();
         let pr = Pr::new(&pr, UserId(1), RepositoryId(1));
-        
+
         pr.insert().execute(&mut conn).await.unwrap();
 
-        let pr = Pr::find(RepositoryId(1), pr.github_pr_number as u64).get_result(&mut conn).await.unwrap();
+        let pr = Pr::find(RepositoryId(1), pr.github_pr_number as u64)
+            .get_result(&mut conn)
+            .await
+            .unwrap();
 
         let (mut repo_client, mut rx) = MockRepoClient::new(DefaultMergeWorkflow);
 
@@ -244,7 +250,9 @@ mod tests {
         let pr_number = pr.github_pr_number as u64;
 
         let task = tokio::spawn(async move {
-            update_labels(&mut conn, &pr, GithubCiRunStatus::Queued, false, &repo_client).await.unwrap();
+            update_labels(&mut conn, &pr, GithubCiRunStatus::Queued, false, &repo_client)
+                .await
+                .unwrap();
             (conn, repo_client)
         });
 
@@ -256,7 +264,11 @@ mod tests {
             } => {
                 assert_eq!(issue_number, pr_number);
                 assert_eq!(labels, vec!["queued".to_string()]);
-                result.send(Ok(vec![Label { name: "queued".to_string() }])).expect("failed to send result");
+                result
+                    .send(Ok(vec![Label {
+                        name: "queued".to_string(),
+                    }]))
+                    .expect("failed to send result");
             }
             _ => panic!("expected AddLabels event"),
         }
@@ -267,7 +279,9 @@ mod tests {
         assert_eq!(pr.added_labels, vec!["queued"]);
 
         let task = tokio::spawn(async move {
-            update_labels(&mut conn, &pr, GithubCiRunStatus::InProgress, false, &repo_client).await.unwrap();
+            update_labels(&mut conn, &pr, GithubCiRunStatus::InProgress, false, &repo_client)
+                .await
+                .unwrap();
             (conn, repo_client)
         });
 
@@ -279,7 +293,16 @@ mod tests {
             } => {
                 assert_eq!(issue_number, pr_number);
                 assert_eq!(labels, vec!["in_progress".to_string()]);
-                result.send(Ok(vec![Label { name: "in_progress".to_string() }, Label { name: "queued".to_string() }])).expect("failed to send result");
+                result
+                    .send(Ok(vec![
+                        Label {
+                            name: "in_progress".to_string(),
+                        },
+                        Label {
+                            name: "queued".to_string(),
+                        },
+                    ]))
+                    .expect("failed to send result");
             }
             _ => panic!("expected AddLabels event"),
         }
@@ -292,11 +315,23 @@ mod tests {
             } => {
                 assert_eq!(issue_number, pr_number);
                 assert_eq!(labels, vec!["merge".to_string()]);
-                result.send(Ok(vec![Label { name: "merge".to_string() }, Label { name: "in_progress".to_string() }, Label { name: "queued".to_string() }])).expect("failed to send result");
+                result
+                    .send(Ok(vec![
+                        Label {
+                            name: "merge".to_string(),
+                        },
+                        Label {
+                            name: "in_progress".to_string(),
+                        },
+                        Label {
+                            name: "queued".to_string(),
+                        },
+                    ]))
+                    .expect("failed to send result");
             }
             _ => panic!("expected AddLabels event"),
         }
-        
+
         match rx.recv().await.unwrap() {
             MockRepoAction::RemoveLabel {
                 issue_number,
@@ -305,7 +340,16 @@ mod tests {
             } => {
                 assert_eq!(issue_number, pr_number);
                 assert_eq!(label, "queued");
-                result.send(Ok(vec![Label { name: "merge".to_string() }, Label { name: "in_progress".to_string() }])).expect("failed to send result");
+                result
+                    .send(Ok(vec![
+                        Label {
+                            name: "merge".to_string(),
+                        },
+                        Label {
+                            name: "in_progress".to_string(),
+                        },
+                    ]))
+                    .expect("failed to send result");
             }
             _ => panic!("expected RemoveLabel event"),
         }
@@ -316,5 +360,3 @@ mod tests {
         assert_eq!(pr.added_labels, vec!["in_progress", "merge"]);
     }
 }
-
-

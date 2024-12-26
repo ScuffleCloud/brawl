@@ -1027,7 +1027,11 @@ mod tests {
         }
 
         match rx.recv().await.unwrap() {
-            MockRepoAction::AddLabels { issue_number, labels, result } => {
+            MockRepoAction::AddLabels {
+                issue_number,
+                labels,
+                result,
+            } => {
                 assert_eq!(issue_number, 1);
                 assert_eq!(labels, vec!["merge_success"]);
                 result.send(Ok(vec![])).unwrap();
@@ -1428,7 +1432,11 @@ mod tests {
         }
 
         match rx.recv().await.unwrap() {
-            MockRepoAction::AddLabels { issue_number, labels, result } => {
+            MockRepoAction::AddLabels {
+                issue_number,
+                labels,
+                result,
+            } => {
                 assert_eq!(issue_number, 1);
                 assert_eq!(labels, vec!["try_failure"]);
                 result.send(Ok(vec![])).unwrap();
@@ -1661,7 +1669,11 @@ mod tests {
         }
 
         match rx.recv().await.unwrap() {
-            MockRepoAction::AddLabels { issue_number, labels, result } => {
+            MockRepoAction::AddLabels {
+                issue_number,
+                labels,
+                result,
+            } => {
                 assert_eq!(issue_number, 1);
                 assert_eq!(labels, vec!["try_in_progress"]);
                 result.send(Ok(vec![])).unwrap();
@@ -2349,7 +2361,11 @@ mod tests {
         }
 
         match rx.recv().await.unwrap() {
-            MockRepoAction::AddLabels { issue_number, labels, result } => {
+            MockRepoAction::AddLabels {
+                issue_number,
+                labels,
+                result,
+            } => {
                 assert_eq!(issue_number, 1);
                 assert_eq!(labels, vec!["merge_queued"]);
                 result.send(Ok(vec![])).unwrap();
