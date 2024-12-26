@@ -164,10 +164,10 @@ mod tests {
 
         let cases: &[(GithubCiRunStatus, bool, &[&str])] = &[
             (GithubCiRunStatus::Queued, false, &["queued"]),
-            (GithubCiRunStatus::InProgress, false, &["merge", "in_progress"]),
-            (GithubCiRunStatus::InProgress, true, &["try", "in_progress"]),
-            (GithubCiRunStatus::Failure, false, &["merge", "failure"]),
-            (GithubCiRunStatus::Failure, true, &["try", "failure"]),
+            (GithubCiRunStatus::InProgress, false, &["in_progress", "merge"]),
+            (GithubCiRunStatus::InProgress, true, &["in_progress", "try"]),
+            (GithubCiRunStatus::Failure, false, &["failure", "merge"]),
+            (GithubCiRunStatus::Failure, true, &["failure", "try"]),
             (GithubCiRunStatus::Success, false, &["merge", "success"]),
             (GithubCiRunStatus::Cancelled, false, &[]),
             (GithubCiRunStatus::Cancelled, true, &[]),
@@ -247,8 +247,8 @@ mod tests {
             labels_to_add,
             labels_to_remove,
         } = get_adjustments(&pr, GithubCiRunStatus::InProgress, false, &config);
-        assert_eq!(desired_labels, &["in_progress", "merge", "auto-try"]);
-        assert_eq!(labels_to_add, &["in_progress", "auto-try"]);
+        assert_eq!(desired_labels, &["auto-try", "in_progress", "merge"]);
+        assert_eq!(labels_to_add, &["auto-try", "in_progress"]);
         assert_eq!(labels_to_remove, &["queued"]);
     }
 

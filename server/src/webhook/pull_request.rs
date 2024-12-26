@@ -48,7 +48,7 @@ pub async fn handle_with_pr<R: GitHubRepoClient>(
 
             match &run {
                 Some(run) if !run.is_dry_run => {
-                    repo.merge_workflow().cancel(&run, repo, conn, &current).await?;
+                    repo.merge_workflow().cancel(run, repo, conn, &current).await?;
                     repo.send_message(
                         run.github_pr_number as u64,
                         &messages::error_no_body(format!(
@@ -62,7 +62,7 @@ pub async fn handle_with_pr<R: GitHubRepoClient>(
                     .await?;
                 }
                 Some(run) if current.auto_try && commit_head_changed && run.is_dry_run => {
-                    repo.merge_workflow().cancel(&run, repo, conn, &current).await?;
+                    repo.merge_workflow().cancel(run, repo, conn, &current).await?;
                 }
                 _ => {}
             }

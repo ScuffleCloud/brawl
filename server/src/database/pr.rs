@@ -274,7 +274,8 @@ mod tests {
       "github_pr"."latest_commit_sha",
       "github_pr"."added_labels",
       "github_pr"."created_at",
-      "github_pr"."updated_at"
+      "github_pr"."updated_at",
+      "github_pr"."auto_try"
     FROM
       "github_pr"
     WHERE
@@ -324,7 +325,8 @@ mod tests {
         "latest_commit_sha",
         "added_labels",
         "created_at",
-        "updated_at"
+        "updated_at",
+        "auto_try"
       )
     VALUES
       (
@@ -343,8 +345,9 @@ mod tests {
         $11,
         $12,
         $13,
-        $14
-      ) -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", [], 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z]
+        $14,
+        $15
+      ) -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", [], 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z, false]
     "#,
     }
 
@@ -429,7 +432,8 @@ mod tests {
         "latest_commit_sha",
         "added_labels",
         "created_at",
-        "updated_at"
+        "updated_at",
+        "auto_try"
       )
     VALUES
       (
@@ -448,21 +452,20 @@ mod tests {
         $11,
         $12,
         $13,
-        $14
+        $14,
+        $15
       ) ON CONFLICT ("github_repo_id", "github_pr_number") DO
     UPDATE
     SET
-      "added_labels" = $15,
       "title" = $16,
       "body" = $17,
       "merge_status" = $18,
       "assigned_ids" = $19,
       "status" = $20,
-      "default_priority" = $21,
-      "merge_commit_sha" = $22,
-      "target_branch" = $23,
-      "latest_commit_sha" = $24,
-      "updated_at" = $25
+      "merge_commit_sha" = $21,
+      "target_branch" = $22,
+      "latest_commit_sha" = $23,
+      "updated_at" = $24
     RETURNING
       "github_pr"."github_repo_id",
       "github_pr"."github_pr_number",
@@ -479,7 +482,8 @@ mod tests {
       "github_pr"."latest_commit_sha",
       "github_pr"."added_labels",
       "github_pr"."created_at",
-      "github_pr"."updated_at" -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", [], 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z, [], "test", "test", NotReady, [], Open, None, None, "test", "test", 2024-06-20T02:40:00Z]
+      "github_pr"."updated_at",
+      "github_pr"."auto_try" -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", [], 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z, false, "test", "test", NotReady, [], Open, None, "test", "test", 2024-06-20T02:40:00Z]
     "#,
     }
 
