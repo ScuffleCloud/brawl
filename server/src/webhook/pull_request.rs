@@ -35,7 +35,8 @@ pub async fn handle_with_pr<R: GitHubRepoClient>(
         let update = current.update_from(&pr);
         if update.needs_update() {
             update.query().execute(conn).await?;
-            let commit_head_changed = current.latest_commit_sha != pr.head.sha;
+            let current_head_sha = current.latest_commit_sha.clone();
+            let commit_head_changed = current_head_sha != pr.head.sha;
             update.update_pr(&mut current);
 
             // Fetch the active run (if there is one)
@@ -67,6 +68,7 @@ pub async fn handle_with_pr<R: GitHubRepoClient>(
             }
 
             if current.auto_try && commit_head_changed && run.is_none_or(|r| r.is_dry_run) {
+                tracing::info!("starting auto-try because head changed from {} to {}", current_head_sha, pr.head.sha);
                 let run = CiRun::insert(repo.id(), pr.number)
                     .base_ref(Base::from_pr(&pr))
                     .head_commit_sha(pr.head.sha.as_str().into())
