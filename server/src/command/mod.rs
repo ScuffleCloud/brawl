@@ -114,18 +114,8 @@ impl FromStr for BrawlCommand {
             }
             "retry" => Ok(BrawlCommand::Retry),
             "ping" => Ok(BrawlCommand::Ping),
-            "auto-try" => {
-                let mut force = false;
-                let mut disable = false;
-
-                match splits.next() {
-                    Some("force") => force = true,
-                    Some("disable") => disable = true,
-                    _ => (),
-                }
-
-                Ok(BrawlCommand::AutoTry(AutoTryCommand { force, disable }))
-            }
+            "auto-try" => Ok(BrawlCommand::AutoTry(AutoTryCommand::Enable)),
+            "!auto-try" => Ok(BrawlCommand::AutoTry(AutoTryCommand::Disable)),
             command => {
                 tracing::debug!("invalid command: {}", command);
                 Err(BrawlCommandError::InvalidCommand(command.into()))
@@ -221,55 +211,8 @@ mod tests {
             ),
             ("<no command>", Err(BrawlCommandError::NoCommand)),
             ("@brawl @brawl merge", Err(BrawlCommandError::InvalidCommand("@brawl".into()))),
-            (
-                "@brawl auto-try",
-                Ok(BrawlCommand::AutoTry(AutoTryCommand {
-                    force: false,
-                    disable: false,
-                })),
-            ),
-            (
-                "@brawl auto-try disable",
-                Ok(BrawlCommand::AutoTry(AutoTryCommand {
-                    force: false,
-                    disable: true,
-                })),
-            ),
-            (
-                "@brawl auto-try force",
-                Ok(BrawlCommand::AutoTry(AutoTryCommand {
-                    force: true,
-                    disable: false,
-                })),
-            ),
-            (
-                "@brawl auto-try something else",
-                Ok(BrawlCommand::AutoTry(AutoTryCommand {
-                    force: false,
-                    disable: false,
-                })),
-            ),
-            (
-                "@brawl auto-try force something else",
-                Ok(BrawlCommand::AutoTry(AutoTryCommand {
-                    force: true,
-                    disable: false,
-                })),
-            ),
-            (
-                "@brawl auto-try disable something else",
-                Ok(BrawlCommand::AutoTry(AutoTryCommand {
-                    force: false,
-                    disable: true,
-                })),
-            ),
-            (
-                "@brawl auto-try disable force",
-                Ok(BrawlCommand::AutoTry(AutoTryCommand {
-                    force: false,
-                    disable: true,
-                })),
-            ),
+            ("@brawl auto-try", Ok(BrawlCommand::AutoTry(AutoTryCommand::Enable))),
+            ("@brawl !auto-try", Ok(BrawlCommand::AutoTry(AutoTryCommand::Disable))),
         ];
 
         for (input, expected) in cases {

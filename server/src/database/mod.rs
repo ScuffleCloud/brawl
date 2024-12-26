@@ -35,7 +35,8 @@ pub async fn get_test_connection() -> diesel_async::AsyncPgConnection {
         .with_line_number(true)
         .with_target(true)
         .with_level(true)
-        .init();
+        .try_init()
+        .ok();
 
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let mut conn = tokio::time::timeout(

@@ -169,8 +169,8 @@ pub fn pong(username: impl std::fmt::Display, status: impl std::fmt::Display) ->
     IssueMessage::Pong(format!(include_str!("pong.md"), username = username, status = status,))
 }
 
-pub fn auto_try_enabled() -> IssueMessage {
-    IssueMessage::AutoTryEnabled(include_str!("auto_try_enabled.md").to_string())
+pub fn auto_try_enabled(requested_by: impl std::fmt::Display) -> IssueMessage {
+    IssueMessage::AutoTryEnabled(format!(include_str!("auto_try_enabled.md"), requested_by = requested_by))
 }
 
 pub fn auto_try_disabled() -> IssueMessage {
