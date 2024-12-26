@@ -2425,20 +2425,22 @@ mod tests {
         match rx.recv().await.unwrap() {
             MockRepoAction::BranchWorkflows { branch, result } => {
                 assert_eq!(branch, "ci_branch");
-                result.send(Ok(vec![
-                    WorkflowRun {
-                        id: RunId(1),
-                        conclusion: None,
-                        head_sha: "run_commit_sha".to_string(),
-                        ..Default::default()
-                    },
-                    WorkflowRun {
-                        id: RunId(2),
-                        conclusion: None,
-                        head_sha: "not_run_commit_sha".to_string(),
-                        ..Default::default()
-                    },
-                ])).unwrap();
+                result
+                    .send(Ok(vec![
+                        WorkflowRun {
+                            id: RunId(1),
+                            conclusion: None,
+                            head_sha: "run_commit_sha".to_string(),
+                            ..Default::default()
+                        },
+                        WorkflowRun {
+                            id: RunId(2),
+                            conclusion: None,
+                            head_sha: "not_run_commit_sha".to_string(),
+                            ..Default::default()
+                        },
+                    ]))
+                    .unwrap();
             }
             r => panic!("unexpected action: {:?} expected branch", r),
         }

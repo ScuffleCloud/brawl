@@ -851,7 +851,10 @@ pub mod test_utils {
         async fn branch_workflows(&self, branch: &str) -> anyhow::Result<Vec<WorkflowRun>> {
             let (tx, rx) = tokio::sync::oneshot::channel();
             self.actions
-                .send(MockRepoAction::BranchWorkflows { branch: branch.to_string(), result: tx })
+                .send(MockRepoAction::BranchWorkflows {
+                    branch: branch.to_string(),
+                    result: tx,
+                })
                 .await
                 .expect("send branch workflows");
             rx.await.expect("recv branch workflows")
@@ -2003,43 +2006,79 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_workflow_run_link() {
         let octocrab = octocrab::Octocrab::builder().personal_token("token").build().unwrap();
-        let repo = mock_repo_client(octocrab, default_repo(), GitHubBrawlRepoConfig::default(), MockMergeWorkflow(1));
-        assert_eq!(repo.workflow_run_link(RunId(1)), "https://github.com/ScuffleCloud/ci-testing/actions/runs/1");
+        let repo = mock_repo_client(
+            octocrab,
+            default_repo(),
+            GitHubBrawlRepoConfig::default(),
+            MockMergeWorkflow(1),
+        );
+        assert_eq!(
+            repo.workflow_run_link(RunId(1)),
+            "https://github.com/ScuffleCloud/ci-testing/actions/runs/1"
+        );
     }
 
     #[tokio::test]
     async fn test_repo_client_pr_link() {
         let octocrab = octocrab::Octocrab::builder().personal_token("token").build().unwrap();
-        let repo = mock_repo_client(octocrab, default_repo(), GitHubBrawlRepoConfig::default(), MockMergeWorkflow(1));
+        let repo = mock_repo_client(
+            octocrab,
+            default_repo(),
+            GitHubBrawlRepoConfig::default(),
+            MockMergeWorkflow(1),
+        );
         assert_eq!(repo.pr_link(1), "https://github.com/ScuffleCloud/ci-testing/pull/1");
     }
 
     #[tokio::test]
     async fn test_repo_client_owner() {
         let octocrab = octocrab::Octocrab::builder().personal_token("token").build().unwrap();
-        let repo = mock_repo_client(octocrab, default_repo(), GitHubBrawlRepoConfig::default(), MockMergeWorkflow(1));
+        let repo = mock_repo_client(
+            octocrab,
+            default_repo(),
+            GitHubBrawlRepoConfig::default(),
+            MockMergeWorkflow(1),
+        );
         assert_eq!(repo.owner(), "ScuffleCloud");
     }
 
     #[tokio::test]
     async fn test_repo_client_name() {
         let octocrab = octocrab::Octocrab::builder().personal_token("token").build().unwrap();
-        let repo = mock_repo_client(octocrab, default_repo(), GitHubBrawlRepoConfig::default(), MockMergeWorkflow(1));
+        let repo = mock_repo_client(
+            octocrab,
+            default_repo(),
+            GitHubBrawlRepoConfig::default(),
+            MockMergeWorkflow(1),
+        );
         assert_eq!(repo.name(), "ci-testing");
     }
 
     #[tokio::test]
     async fn test_repo_client_commit_link() {
         let octocrab = octocrab::Octocrab::builder().personal_token("token").build().unwrap();
-        let repo = mock_repo_client(octocrab, default_repo(), GitHubBrawlRepoConfig::default(), MockMergeWorkflow(1));
-        assert_eq!(repo.commit_link("b7f8cd1bd474d5be1802377c9a0baea5eb59fcb6"), "https://github.com/ScuffleCloud/ci-testing/commit/b7f8cd1bd474d5be1802377c9a0baea5eb59fcb6");
+        let repo = mock_repo_client(
+            octocrab,
+            default_repo(),
+            GitHubBrawlRepoConfig::default(),
+            MockMergeWorkflow(1),
+        );
+        assert_eq!(
+            repo.commit_link("b7f8cd1bd474d5be1802377c9a0baea5eb59fcb6"),
+            "https://github.com/ScuffleCloud/ci-testing/commit/b7f8cd1bd474d5be1802377c9a0baea5eb59fcb6"
+        );
     }
 
     #[tokio::test]
     async fn test_repo_client_get_workflow_runs() {
         let (octocrab, mut handle) = mock_octocrab();
 
-        let repo = mock_repo_client(octocrab, default_repo(), GitHubBrawlRepoConfig::default(), MockMergeWorkflow(1));
+        let repo = mock_repo_client(
+            octocrab,
+            default_repo(),
+            GitHubBrawlRepoConfig::default(),
+            MockMergeWorkflow(1),
+        );
         let task = tokio::spawn(async move {
             repo.branch_workflows("main").await.unwrap();
         });
@@ -2070,7 +2109,12 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_cancel_workflow_run() {
         let (octocrab, mut handle) = mock_octocrab();
-        let repo = mock_repo_client(octocrab, default_repo(), GitHubBrawlRepoConfig::default(), MockMergeWorkflow(1));
+        let repo = mock_repo_client(
+            octocrab,
+            default_repo(),
+            GitHubBrawlRepoConfig::default(),
+            MockMergeWorkflow(1),
+        );
         let task = tokio::spawn(async move {
             repo.cancel_workflow_run(RunId(1)).await.unwrap();
         });
