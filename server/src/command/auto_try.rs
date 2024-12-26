@@ -1,6 +1,9 @@
+use anyhow::Context;
+use diesel::OptionalExtension;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
 use super::BrawlCommandContext;
+use crate::database::ci_run::CiRun;
 use crate::database::pr::Pr;
 use crate::github::messages;
 use crate::github::models::PullRequest;
@@ -33,6 +36,17 @@ async fn handle_with_pr<R: GitHubRepoClient>(
 
     if !context.repo.can_try(context.user.id).await? {
         tracing::debug!("user does not have permission to do this");
+        return Ok(());
+    }
+
+    let active_run = CiRun::active(context.repo.id(), context.pr_number)
+        .get_result(conn)
+        .await
+        .optional()
+        .context("fetch active run")?;
+
+    if active_run.is_some_and(|r| !r.is_dry_run) {
+        context.repo.send_message(context.pr_number, &messages::error_no_body("Cannot enable auto-try while a merge is in progress, use `?brawl cancel` to cancel it first & then try again.")).await?;
         return Ok(());
     }
 

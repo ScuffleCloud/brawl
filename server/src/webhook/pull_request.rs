@@ -35,6 +35,7 @@ pub async fn handle_with_pr<R: GitHubRepoClient>(
         let update = current.update_from(&pr);
         if update.needs_update() {
             update.query().execute(conn).await?;
+            let commit_head_changed = current.latest_commit_sha != pr.head.sha;
             update.update_pr(&mut current);
 
             // Fetch the active run (if there is one)
@@ -44,7 +45,7 @@ pub async fn handle_with_pr<R: GitHubRepoClient>(
                 .optional()
                 .context("fetch ci run")?;
 
-            match run {
+            match &run {
                 Some(run) if !run.is_dry_run => {
                     repo.merge_workflow().cancel(&run, repo, conn, &current).await?;
                     repo.send_message(
@@ -59,13 +60,13 @@ pub async fn handle_with_pr<R: GitHubRepoClient>(
                     )
                     .await?;
                 }
-                Some(run) if current.auto_try => {
+                Some(run) if current.auto_try && commit_head_changed && run.is_dry_run => {
                     repo.merge_workflow().cancel(&run, repo, conn, &current).await?;
                 }
                 _ => {}
             }
 
-            if current.auto_try {
+            if current.auto_try && commit_head_changed && run.is_none_or(|r| r.is_dry_run) {
                 let run = CiRun::insert(repo.id(), pr.number)
                     .base_ref(Base::from_pr(&pr))
                     .head_commit_sha(pr.head.sha.as_str().into())
