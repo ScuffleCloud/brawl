@@ -6,7 +6,7 @@ use arc_swap::ArcSwap;
 use axum::http;
 use moka::future::Cache;
 use octocrab::models::repos::{Object, Ref};
-use octocrab::models::{RepositoryId, UserId};
+use octocrab::models::{RepositoryId, RunId, UserId};
 use octocrab::params::repos::Reference;
 use octocrab::params::{self};
 use octocrab::{GitHubError, Octocrab};
@@ -15,7 +15,7 @@ use super::config::{GitHubBrawlRepoConfig, Permission, Role};
 use super::installation::UserCache;
 use super::merge_workflow::{DefaultMergeWorkflow, GitHubMergeWorkflow};
 use super::messages::{CommitMessage, IssueMessage};
-use super::models::{Commit, Label, PullRequest, Repository, Review, User};
+use super::models::{Commit, Label, PullRequest, Repository, Review, User, WorkflowRun};
 
 pub struct RepoClient<W = DefaultMergeWorkflow> {
     pub(super) repo: ArcSwap<Repository>,
@@ -69,6 +69,16 @@ pub trait GitHubRepoClient: Send + Sync {
             owner = self.owner(),
             repo = self.name(),
             sha = sha,
+        )
+    }
+
+    /// A link to a workflow run in the repository
+    fn workflow_run_link(&self, run_id: RunId) -> String {
+        format!(
+            "https://github.com/{owner}/{repo}/actions/runs/{run_id}",
+            owner = self.owner(),
+            repo = self.name(),
+            run_id = run_id,
         )
     }
 
@@ -126,6 +136,12 @@ pub trait GitHubRepoClient: Send + Sync {
 
     /// Delete a branch from the repository
     fn delete_branch(&self, branch: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+
+    /// Get the workflows for a branch
+    fn branch_workflows(&self, branch: &str) -> impl std::future::Future<Output = anyhow::Result<Vec<WorkflowRun>>> + Send;
+
+    /// Cancel a workflow
+    fn cancel_workflow_run(&self, run_id: RunId) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
 
     /// Add labels to a pull request
     fn add_labels(
@@ -474,6 +490,37 @@ impl<W: GitHubMergeWorkflow> GitHubRepoClient for RepoClient<W> {
             .await?;
         Ok(reviewers.into_iter().map(|r| r.into()).collect())
     }
+
+    async fn branch_workflows(&self, branch: &str) -> anyhow::Result<Vec<WorkflowRun>> {
+        let page = self
+            .client
+            .workflows(self.owner(), self.name())
+            .list_all_runs()
+            .branch(branch.to_owned())
+            .per_page(100)
+            .page(1u32)
+            .send()
+            .await?;
+
+        let pages = self.client.all_pages(page).await?;
+
+        Ok(pages.into_iter().map(|w| w.into()).collect())
+    }
+
+    async fn cancel_workflow_run(&self, run_id: RunId) -> anyhow::Result<()> {
+        self.client
+            .post::<_, serde_json::Value>(
+                format!(
+                    "/repos/{owner}/{repo}/actions/runs/{id}/cancel",
+                    owner = self.owner(),
+                    repo = self.name(),
+                    id = run_id
+                ),
+                None::<&()>,
+            )
+            .await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -593,6 +640,14 @@ pub mod test_utils {
             issue_number: u64,
             label: String,
             result: tokio::sync::oneshot::Sender<anyhow::Result<Vec<Label>>>,
+        },
+        BranchWorkflows {
+            branch: String,
+            result: tokio::sync::oneshot::Sender<anyhow::Result<Vec<WorkflowRun>>>,
+        },
+        CancelWorkflowRun {
+            run_id: RunId,
+            result: tokio::sync::oneshot::Sender<anyhow::Result<()>>,
         },
     }
 
@@ -791,6 +846,27 @@ pub mod test_utils {
                 .await
                 .expect("send remove label");
             rx.await.expect("recv remove label")
+        }
+
+        async fn branch_workflows(&self, branch: &str) -> anyhow::Result<Vec<WorkflowRun>> {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            self.actions
+                .send(MockRepoAction::BranchWorkflows {
+                    branch: branch.to_string(),
+                    result: tx,
+                })
+                .await
+                .expect("send branch workflows");
+            rx.await.expect("recv branch workflows")
+        }
+
+        async fn cancel_workflow_run(&self, run_id: RunId) -> anyhow::Result<()> {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            self.actions
+                .send(MockRepoAction::CancelWorkflowRun { run_id, result: tx })
+                .await
+                .expect("send cancel workflow");
+            rx.await.expect("recv cancel workflow")
         }
     }
 }
@@ -1923,6 +1999,146 @@ mod tests {
         "#);
 
         resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/remove_label.json")));
+
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_repo_client_workflow_run_link() {
+        let octocrab = octocrab::Octocrab::builder().personal_token("token").build().unwrap();
+        let repo = mock_repo_client(
+            octocrab,
+            default_repo(),
+            GitHubBrawlRepoConfig::default(),
+            MockMergeWorkflow(1),
+        );
+        assert_eq!(
+            repo.workflow_run_link(RunId(1)),
+            "https://github.com/ScuffleCloud/ci-testing/actions/runs/1"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_repo_client_pr_link() {
+        let octocrab = octocrab::Octocrab::builder().personal_token("token").build().unwrap();
+        let repo = mock_repo_client(
+            octocrab,
+            default_repo(),
+            GitHubBrawlRepoConfig::default(),
+            MockMergeWorkflow(1),
+        );
+        assert_eq!(repo.pr_link(1), "https://github.com/ScuffleCloud/ci-testing/pull/1");
+    }
+
+    #[tokio::test]
+    async fn test_repo_client_owner() {
+        let octocrab = octocrab::Octocrab::builder().personal_token("token").build().unwrap();
+        let repo = mock_repo_client(
+            octocrab,
+            default_repo(),
+            GitHubBrawlRepoConfig::default(),
+            MockMergeWorkflow(1),
+        );
+        assert_eq!(repo.owner(), "ScuffleCloud");
+    }
+
+    #[tokio::test]
+    async fn test_repo_client_name() {
+        let octocrab = octocrab::Octocrab::builder().personal_token("token").build().unwrap();
+        let repo = mock_repo_client(
+            octocrab,
+            default_repo(),
+            GitHubBrawlRepoConfig::default(),
+            MockMergeWorkflow(1),
+        );
+        assert_eq!(repo.name(), "ci-testing");
+    }
+
+    #[tokio::test]
+    async fn test_repo_client_commit_link() {
+        let octocrab = octocrab::Octocrab::builder().personal_token("token").build().unwrap();
+        let repo = mock_repo_client(
+            octocrab,
+            default_repo(),
+            GitHubBrawlRepoConfig::default(),
+            MockMergeWorkflow(1),
+        );
+        assert_eq!(
+            repo.commit_link("b7f8cd1bd474d5be1802377c9a0baea5eb59fcb6"),
+            "https://github.com/ScuffleCloud/ci-testing/commit/b7f8cd1bd474d5be1802377c9a0baea5eb59fcb6"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_repo_client_get_workflow_runs() {
+        let (octocrab, mut handle) = mock_octocrab();
+
+        let repo = mock_repo_client(
+            octocrab,
+            default_repo(),
+            GitHubBrawlRepoConfig::default(),
+            MockMergeWorkflow(1),
+        );
+        let task = tokio::spawn(async move {
+            repo.branch_workflows("main").await.unwrap();
+        });
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: GET,
+            uri: "/repos/ScuffleCloud/ci-testing/actions/runs?branch=main&per_page=100&page=1",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_workflow_runs.json")));
+
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_repo_client_cancel_workflow_run() {
+        let (octocrab, mut handle) = mock_octocrab();
+        let repo = mock_repo_client(
+            octocrab,
+            default_repo(),
+            GitHubBrawlRepoConfig::default(),
+            MockMergeWorkflow(1),
+        );
+        let task = tokio::spawn(async move {
+            repo.cancel_workflow_run(RunId(1)).await.unwrap();
+        });
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: POST,
+            uri: "/repos/ScuffleCloud/ci-testing/actions/runs/1/cancel",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/cancel_workflow_run.json")));
 
         task.await.unwrap();
     }

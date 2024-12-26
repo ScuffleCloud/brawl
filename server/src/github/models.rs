@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use octocrab::models::pulls::{MergeableState, ReviewState};
-use octocrab::models::{InstallationId, IssueState, RepositoryId, UserId};
+use octocrab::models::{InstallationId, IssueState, RepositoryId, RunId, UserId, WorkflowId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct User {
@@ -243,6 +243,51 @@ impl From<octocrab::models::Installation> for Installation {
         Self {
             id: value.id,
             account: value.account.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowRun {
+    pub id: RunId,
+    pub workflow_id: WorkflowId,
+    pub name: String,
+    pub head_sha: String,
+    pub head_branch: String,
+    pub conclusion: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub status: String,
+}
+
+impl From<octocrab::models::workflows::Run> for WorkflowRun {
+    fn from(value: octocrab::models::workflows::Run) -> Self {
+        Self {
+            id: value.id,
+            workflow_id: value.workflow_id,
+            name: value.name,
+            head_sha: value.head_sha,
+            head_branch: value.head_branch,
+            conclusion: value.conclusion,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+            status: value.status,
+        }
+    }
+}
+
+impl Default for WorkflowRun {
+    fn default() -> Self {
+        Self {
+            id: RunId(0),
+            workflow_id: WorkflowId(0),
+            name: "workflow".to_string(),
+            head_sha: "sha".to_string(),
+            head_branch: "branch".to_string(),
+            conclusion: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            status: "status".to_string(),
         }
     }
 }
