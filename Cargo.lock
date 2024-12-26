@@ -2377,13 +2377,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "scuffle-perf-cli"
-version = "0.1.0"
-dependencies = [
- "scuffle-workspace-hack",
-]
-
-[[package]]
 name = "scuffle-pprof"
 version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
