@@ -38,6 +38,16 @@ Inspired by [rustc-perf](https://github.com/rust-lang/rustc-perf), [bors](https:
 
 ---
 
+## Features
+
+- [x] PR merging (dry run & full merge)
+- [x] Native GitHub reviewer integration 
+- [x] State labels (add labels based on the state of the PR)
+- [ ] Automatic try on PR push
+- [ ] Config Change Detection
+- [ ] Roll up PRs (roll up multiple PRs into a single PR)
+- [ ] Performance Benchmarks (upload, compare, dashboard)
+
 ## 🤝 Join the Scuffle Community
 
 We ❤️ contributions! Check out our [**CONTRIBUTING.md**](./CONTRIBUTING.md) for detailed guidelines on submitting improvements or bug fixes.
