@@ -1,0 +1,1 @@
+🔴 Auto-try disabled

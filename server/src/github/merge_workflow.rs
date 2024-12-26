@@ -816,6 +816,7 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             added_labels: vec![],
+            auto_try: false,
         };
 
         diesel::insert_into(crate::database::schema::github_pr::table)
@@ -897,6 +898,7 @@ mod tests {
             on_merge_failure: vec!["merge_failure".to_string()],
             on_try_in_progress: vec!["try_in_progress".to_string()],
             on_try_failure: vec!["try_failure".to_string()],
+            auto_try_enabled: vec!["auto-try".to_string()],
         };
 
         UpdateCiRun::builder(run.id)
@@ -1337,6 +1339,7 @@ mod tests {
             on_merge_failure: vec!["merge_failure".to_string()],
             on_try_in_progress: vec!["try_in_progress".to_string()],
             on_try_failure: vec!["try_failure".to_string()],
+            auto_try_enabled: vec!["auto-try".to_string()],
         };
 
         UpdateCiRun::builder(run.id)
@@ -1551,6 +1554,7 @@ mod tests {
             on_merge_failure: vec!["merge_failure".to_string()],
             on_try_in_progress: vec!["try_in_progress".to_string()],
             on_try_failure: vec!["try_failure".to_string()],
+            auto_try_enabled: vec!["auto-try".to_string()],
         };
 
         let task = tokio::spawn(async move {
@@ -2291,6 +2295,7 @@ mod tests {
             on_merge_failure: vec!["merge_failure".to_string()],
             on_try_in_progress: vec!["try_in_progress".to_string()],
             on_try_failure: vec!["try_failure".to_string()],
+            auto_try_enabled: vec!["auto-try".to_string()],
         };
 
         let task = tokio::spawn(async move {

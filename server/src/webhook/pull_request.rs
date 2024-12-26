@@ -2,7 +2,7 @@ use anyhow::Context;
 use diesel::OptionalExtension;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 
-use crate::database::ci_run::CiRun;
+use crate::database::ci_run::{Base, CiRun};
 use crate::database::enums::GithubCiRunStatus;
 use crate::database::pr::Pr;
 use crate::github::merge_workflow::GitHubMergeWorkflow;
@@ -26,7 +26,7 @@ pub async fn handle_with_pr<R: GitHubRepoClient>(
     pr: PullRequest,
     user: User,
 ) -> anyhow::Result<()> {
-    if let Some(current) = Pr::find(repo.id(), pr.number)
+    if let Some(mut current) = Pr::find(repo.id(), pr.number)
         .get_result(conn)
         .await
         .optional()
@@ -35,6 +35,7 @@ pub async fn handle_with_pr<R: GitHubRepoClient>(
         let update = current.update_from(&pr);
         if update.needs_update() {
             update.query().execute(conn).await?;
+            update.update_pr(&mut current);
 
             // Fetch the active run (if there is one)
             let run = CiRun::active(repo.id(), pr.number)
@@ -58,7 +59,26 @@ pub async fn handle_with_pr<R: GitHubRepoClient>(
                     )
                     .await?;
                 }
+                Some(run) if current.auto_try => {
+                    repo.merge_workflow().cancel(&run, repo, conn, &current).await?;
+                }
                 _ => {}
+            }
+
+            if current.auto_try {
+                let run = CiRun::insert(repo.id(), pr.number)
+                    .base_ref(Base::from_pr(&pr))
+                    .head_commit_sha(pr.head.sha.as_str().into())
+                    .ci_branch(repo.config().try_branch(pr.number).into())
+                    .requested_by_id(pr.head.user.as_ref().map(|u| u.id.0 as i64).unwrap_or(user.id.0 as i64))
+                    .approved_by_ids(vec![])
+                    .is_dry_run(true)
+                    .build()
+                    .query()
+                    .get_result(conn)
+                    .await?;
+
+                repo.merge_workflow().start(&run, repo, conn, &current).await?;
             }
         }
     } else {

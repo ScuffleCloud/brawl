@@ -191,11 +191,15 @@ mod tests {
                             sha: "head_sha".to_string(),
                             label: Some("head".to_string()),
                             ref_field: "head".to_string(),
+                            repo: None,
+                            user: None,
                         },
                         base: PrBranch {
                             sha: "base_sha".to_string(),
                             label: Some("base".to_string()),
                             ref_field: "base".to_string(),
+                            repo: None,
+                            user: None,
                         },
                         requested_reviewers: vec![
                             User {

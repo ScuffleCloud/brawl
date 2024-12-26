@@ -33,6 +33,7 @@ pub struct Pr<'a> {
     pub added_labels: Vec<Cow<'a, str>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub auto_try: bool,
 }
 
 #[derive(AsChangeset, Identifiable, Clone, bon::Builder)]
@@ -53,6 +54,7 @@ pub struct UpdatePr<'a> {
     pub merge_commit_sha: Option<Option<Cow<'a, str>>>,
     pub target_branch: Option<Cow<'a, str>>,
     pub latest_commit_sha: Option<Cow<'a, str>>,
+    pub auto_try: Option<bool>,
     #[builder(default = chrono::Utc::now())]
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -64,6 +66,34 @@ impl UpdatePr<'_> {
     pub fn with_updated_at(mut self, updated_at: chrono::DateTime<chrono::Utc>) -> Self {
         self.updated_at = updated_at;
         self
+    }
+}
+
+impl<'a> UpdatePr<'a> {
+    pub fn update_pr(self, pr: &mut Pr<'a>) {
+        if self.needs_update() {
+            pr.updated_at = self.updated_at;
+        }
+
+        macro_rules! update_if_some {
+            ($field:expr, $value:expr) => {
+                if let Some(value) = $value {
+                    $field = value;
+                }
+            };
+        }
+
+        update_if_some!(pr.added_labels, self.added_labels);
+        update_if_some!(pr.title, self.title);
+        update_if_some!(pr.body, self.body);
+        update_if_some!(pr.merge_status, self.merge_status);
+        update_if_some!(pr.assigned_ids, self.assigned_ids);
+        update_if_some!(pr.status, self.status);
+        update_if_some!(pr.default_priority, self.default_priority);
+        update_if_some!(pr.merge_commit_sha, self.merge_commit_sha);
+        update_if_some!(pr.target_branch, self.target_branch);
+        update_if_some!(pr.latest_commit_sha, self.latest_commit_sha);
+        update_if_some!(pr.auto_try, self.auto_try);
     }
 }
 
@@ -115,6 +145,7 @@ impl<'a> Pr<'a> {
             added_labels: Vec::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            auto_try: false,
         }
     }
 
@@ -148,6 +179,7 @@ impl<'a> Pr<'a> {
                 merge_commit_sha: Some(self.merge_commit_sha.as_deref().map(Cow::Borrowed)),
                 target_branch: Some(Cow::Borrowed(self.target_branch.as_ref())),
                 latest_commit_sha: Some(Cow::Borrowed(self.latest_commit_sha.as_ref())),
+                auto_try: Some(self.auto_try),
                 updated_at: self.updated_at,
             })
             .returning(Pr::as_select())
@@ -162,7 +194,7 @@ impl<'a> Pr<'a> {
         UpdatePr::builder(self.github_repo_id, self.github_pr_number)
     }
 
-    pub fn update_from(&'a self, new: &'a PullRequest) -> UpdatePr<'a> {
+    pub fn update_from(&self, new: &'a PullRequest) -> UpdatePr<'a> {
         let title = Cow::Borrowed(new.title.as_str());
         let body = Cow::Borrowed(new.body.as_str());
         let merge_status = pr_merge_status(new);
@@ -272,6 +304,7 @@ mod tests {
             merge_status: GithubPrMergeStatus::NotReady,
             status: GithubPrStatus::Open,
             merge_commit_sha: None,
+            auto_try: false,
         }),
         expected: @r#"
     INSERT INTO
@@ -376,6 +409,7 @@ mod tests {
             merge_status: GithubPrMergeStatus::NotReady,
             status: GithubPrStatus::Open,
             merge_commit_sha: None,
+            auto_try: false,
         }),
         expected: @r#"
     INSERT INTO
@@ -536,6 +570,7 @@ mod tests {
             merge_commit_sha: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            auto_try: false,
         }
         .insert()
         .execute(&mut conn)
@@ -567,6 +602,7 @@ mod tests {
             merge_commit_sha: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            auto_try: false,
         }
         .insert()
         .execute(&mut conn)
@@ -606,6 +642,7 @@ mod tests {
             merge_commit_sha: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            auto_try: false,
         }
         .insert()
         .execute(&mut conn)

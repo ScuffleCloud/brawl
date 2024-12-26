@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use auto_try::AutoTryCommand;
 use diesel_async::AsyncPgConnection;
 use dry_run::DryRunCommand;
 use merge::MergeCommand;
@@ -7,6 +8,7 @@ use merge::MergeCommand;
 use crate::github::models::User;
 use crate::github::repo::GitHubRepoClient;
 
+mod auto_try;
 mod cancel;
 mod dry_run;
 mod merge;
@@ -20,6 +22,7 @@ pub enum BrawlCommand {
     Retry,
     Cancel,
     Ping,
+    AutoTry(AutoTryCommand),
 }
 
 pub struct BrawlCommandContext<'a, R> {
@@ -40,6 +43,7 @@ impl BrawlCommand {
             BrawlCommand::Retry => retry::handle(conn, context).await,
             BrawlCommand::Cancel => cancel::handle(conn, context).await,
             BrawlCommand::Ping => ping::handle(conn, context).await,
+            BrawlCommand::AutoTry(command) => auto_try::handle(conn, context, command).await,
         }
     }
 }
@@ -110,6 +114,18 @@ impl FromStr for BrawlCommand {
             }
             "retry" => Ok(BrawlCommand::Retry),
             "ping" => Ok(BrawlCommand::Ping),
+            "auto-try" => {
+                let mut force = false;
+                let mut disable = false;
+
+                match splits.next() {
+                    Some("force") => force = true,
+                    Some("disable") => disable = true,
+                    _ => (),
+                }
+
+                Ok(BrawlCommand::AutoTry(AutoTryCommand { force, disable }))
+            }
             command => {
                 tracing::debug!("invalid command: {}", command);
                 Err(BrawlCommandError::InvalidCommand(command.into()))
@@ -205,6 +221,55 @@ mod tests {
             ),
             ("<no command>", Err(BrawlCommandError::NoCommand)),
             ("@brawl @brawl merge", Err(BrawlCommandError::InvalidCommand("@brawl".into()))),
+            (
+                "@brawl auto-try",
+                Ok(BrawlCommand::AutoTry(AutoTryCommand {
+                    force: false,
+                    disable: false,
+                })),
+            ),
+            (
+                "@brawl auto-try disable",
+                Ok(BrawlCommand::AutoTry(AutoTryCommand {
+                    force: false,
+                    disable: true,
+                })),
+            ),
+            (
+                "@brawl auto-try force",
+                Ok(BrawlCommand::AutoTry(AutoTryCommand {
+                    force: true,
+                    disable: false,
+                })),
+            ),
+            (
+                "@brawl auto-try something else",
+                Ok(BrawlCommand::AutoTry(AutoTryCommand {
+                    force: false,
+                    disable: false,
+                })),
+            ),
+            (
+                "@brawl auto-try force something else",
+                Ok(BrawlCommand::AutoTry(AutoTryCommand {
+                    force: true,
+                    disable: false,
+                })),
+            ),
+            (
+                "@brawl auto-try disable something else",
+                Ok(BrawlCommand::AutoTry(AutoTryCommand {
+                    force: false,
+                    disable: true,
+                })),
+            ),
+            (
+                "@brawl auto-try disable force",
+                Ok(BrawlCommand::AutoTry(AutoTryCommand {
+                    force: false,
+                    disable: true,
+                })),
+            ),
         ];
 
         for (input, expected) in cases {
