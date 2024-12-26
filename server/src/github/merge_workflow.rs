@@ -708,7 +708,7 @@ mod tests {
     use super::*;
     use crate::database::ci_run::{InsertCiRun, UpdateCiRun};
     use crate::database::enums::{GithubPrMergeStatus, GithubPrStatus};
-    use crate::github::config::GitHubBrawlRepoConfig;
+    use crate::github::config::{GitHubBrawlLabelsConfig, GitHubBrawlRepoConfig};
     use crate::github::models::{CheckRunConclusion, CheckRunEvent, CheckRunStatus, Commit};
     use crate::github::repo::test_utils::{MockRepoAction, MockRepoClient};
 
@@ -895,7 +895,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ci_run_refesh_merge_success() {
-        let (mut conn, client, pr, run, mut rx) = ci_run_test_boilerplate(
+        let (mut conn, mut client, pr, run, mut rx) = ci_run_test_boilerplate(
             InsertCiRun::builder(1, 1)
                 .base_ref(Base::Commit(Cow::Borrowed("sha")))
                 .head_commit_sha(Cow::Borrowed("head_commit_sha"))
@@ -906,6 +906,15 @@ mod tests {
                 .build(),
         )
         .await;
+
+        client.config.labels = GitHubBrawlLabelsConfig {
+            on_merge_queued: vec!["merge_queued".to_string()],
+            on_merge_in_progress: vec!["merge_in_progress".to_string()],
+            on_merge_success: vec!["merge_success".to_string()],
+            on_merge_failure: vec!["merge_failure".to_string()],
+            on_try_in_progress: vec!["try_in_progress".to_string()],
+            on_try_failure: vec!["try_failure".to_string()],
+        };
 
         UpdateCiRun::builder(run.id)
             .status(GithubCiRunStatus::InProgress)
@@ -1017,12 +1026,24 @@ mod tests {
             r => panic!("unexpected action: {:?} expected delete branch", r),
         }
 
+        match rx.recv().await.unwrap() {
+            MockRepoAction::AddLabels { issue_number, labels, result } => {
+                assert_eq!(issue_number, 1);
+                assert_eq!(labels, vec!["merge_success"]);
+                result.send(Ok(vec![])).unwrap();
+            }
+            r => panic!("unexpected action: {:?} expected update labels", r),
+        }
+
         let mut conn = task.await.unwrap();
 
         let run = CiRun::latest(RepositoryId(1), 1).get_result(&mut conn).await.unwrap();
         assert_eq!(run.status, GithubCiRunStatus::Success);
         assert!(run.completed_at.is_some());
         assert!(run.run_commit_sha.is_some());
+
+        let pr = Pr::find(RepositoryId(1), 1).get_result(&mut conn).await.unwrap();
+        assert_eq!(pr.added_labels, vec!["merge_success"]);
     }
 
     #[tokio::test]
@@ -1310,7 +1331,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ci_run_refesh_failure() {
-        let (mut conn, client, pr, run, mut rx) = ci_run_test_boilerplate(
+        let (mut conn, mut client, pr, run, mut rx) = ci_run_test_boilerplate(
             InsertCiRun::builder(1, 1)
                 .base_ref(Base::Commit(Cow::Borrowed("sha")))
                 .head_commit_sha(Cow::Borrowed("head_commit_sha"))
@@ -1321,6 +1342,15 @@ mod tests {
                 .build(),
         )
         .await;
+
+        client.config.labels = GitHubBrawlLabelsConfig {
+            on_merge_queued: vec!["merge_queued".to_string()],
+            on_merge_in_progress: vec!["merge_in_progress".to_string()],
+            on_merge_success: vec!["merge_success".to_string()],
+            on_merge_failure: vec!["merge_failure".to_string()],
+            on_try_in_progress: vec!["try_in_progress".to_string()],
+            on_try_failure: vec!["try_failure".to_string()],
+        };
 
         UpdateCiRun::builder(run.id)
             .status(GithubCiRunStatus::InProgress)
@@ -1397,12 +1427,24 @@ mod tests {
             r => panic!("unexpected action: {:?} expected delete branch", r),
         }
 
+        match rx.recv().await.unwrap() {
+            MockRepoAction::AddLabels { issue_number, labels, result } => {
+                assert_eq!(issue_number, 1);
+                assert_eq!(labels, vec!["try_failure"]);
+                result.send(Ok(vec![])).unwrap();
+            }
+            r => panic!("unexpected action: {:?} expected add labels", r),
+        }
+
         let mut conn = task.await.unwrap();
 
         let run = CiRun::latest(RepositoryId(1), 1).get_result(&mut conn).await.unwrap();
         assert_eq!(run.status, GithubCiRunStatus::Failure);
         assert!(run.completed_at.is_some());
         assert!(run.run_commit_sha.is_some());
+
+        let pr = Pr::find(RepositoryId(1), 1).get_result(&mut conn).await.unwrap();
+        assert_eq!(pr.added_labels, vec!["try_failure"]);
     }
 
     #[tokio::test]
@@ -1499,7 +1541,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ci_run_start_base_commit_success() {
-        let (mut conn, client, pr, run, mut rx) = ci_run_test_boilerplate(
+        let (mut conn, mut client, pr, run, mut rx) = ci_run_test_boilerplate(
             InsertCiRun::builder(1, 1)
                 .base_ref(Base::Commit(Cow::Borrowed("sha")))
                 .head_commit_sha(Cow::Borrowed("head_commit_sha"))
@@ -1510,6 +1552,15 @@ mod tests {
                 .build(),
         )
         .await;
+
+        client.config.labels = GitHubBrawlLabelsConfig {
+            on_merge_queued: vec!["merge_queued".to_string()],
+            on_merge_in_progress: vec!["merge_in_progress".to_string()],
+            on_merge_success: vec!["merge_success".to_string()],
+            on_merge_failure: vec!["merge_failure".to_string()],
+            on_try_in_progress: vec!["try_in_progress".to_string()],
+            on_try_failure: vec!["try_failure".to_string()],
+        };
 
         let task = tokio::spawn(async move {
             let status = tokio::time::timeout(
@@ -1609,6 +1660,15 @@ mod tests {
             r => panic!("unexpected action: {:?} expected send message", r),
         }
 
+        match rx.recv().await.unwrap() {
+            MockRepoAction::AddLabels { issue_number, labels, result } => {
+                assert_eq!(issue_number, 1);
+                assert_eq!(labels, vec!["try_in_progress"]);
+                result.send(Ok(vec![])).unwrap();
+            }
+            r => panic!("unexpected action: {:?} expected add labels", r),
+        }
+
         let mut conn = task.await.unwrap();
 
         let run = CiRun::latest(RepositoryId(1), 1).get_result(&mut conn).await.unwrap();
@@ -1616,6 +1676,9 @@ mod tests {
         assert!(run.completed_at.is_none());
         assert_eq!(run.run_commit_sha, Some(Cow::Borrowed("merge_commit_sha")));
         assert!(run.started_at.is_some());
+
+        let pr = Pr::find(RepositoryId(1), 1).get_result(&mut conn).await.unwrap();
+        assert_eq!(pr.added_labels, vec!["try_in_progress"]);
     }
 
     #[tokio::test]
@@ -2214,7 +2277,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ci_queued() {
-        let (mut conn, client, pr, run, mut rx) = ci_run_test_boilerplate(
+        let (mut conn, mut client, pr, run, mut rx) = ci_run_test_boilerplate(
             InsertCiRun::builder(1, 1)
                 .base_ref(Base::Commit(Cow::Borrowed("sha")))
                 .head_commit_sha(Cow::Borrowed("head_commit_sha"))
@@ -2226,8 +2289,18 @@ mod tests {
         )
         .await;
 
+        client.config.labels = GitHubBrawlLabelsConfig {
+            on_merge_queued: vec!["merge_queued".to_string()],
+            on_merge_in_progress: vec!["merge_in_progress".to_string()],
+            on_merge_success: vec!["merge_success".to_string()],
+            on_merge_failure: vec!["merge_failure".to_string()],
+            on_try_in_progress: vec!["try_in_progress".to_string()],
+            on_try_failure: vec!["try_failure".to_string()],
+        };
+
         let task = tokio::spawn(async move {
             DefaultMergeWorkflow.queued(&run, &client, &mut conn, &pr).await.unwrap();
+            conn
         });
 
         match rx.recv().await.unwrap() {
@@ -2275,7 +2348,18 @@ mod tests {
             r => panic!("unexpected action: {:?} expected send message", r),
         }
 
-        task.await.unwrap();
+        match rx.recv().await.unwrap() {
+            MockRepoAction::AddLabels { issue_number, labels, result } => {
+                assert_eq!(issue_number, 1);
+                assert_eq!(labels, vec!["merge_queued"]);
+                result.send(Ok(vec![])).unwrap();
+            }
+            r => panic!("unexpected action: {:?} expected add labels", r),
+        }
+
+        let mut conn = task.await.unwrap();
+        let pr = Pr::find(RepositoryId(1), 1).get_result(&mut conn).await.unwrap();
+        assert_eq!(pr.added_labels, vec!["merge_queued"]);
     }
 
     #[tokio::test]
