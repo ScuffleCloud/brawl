@@ -618,47 +618,30 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
         );
 
         // TODO: cancel runs on github actions
-        if let Some(_run_commit_sha) = &run.run_commit_sha {
-            // let page = repo
-            //     .client()
-            //     .workflows(repo.owner.login.clone(), repo.name.clone())
-            //     .list_all_runs()
-            //     .branch(self.ci_branch.clone())
-            //     .per_page(100)
-            //     .page(1u32)
-            //     .send()
-            //     .await?;
+        if let Some(run_commit_sha) = &run.run_commit_sha {
+            let runs = repo.branch_workflows(&run.ci_branch).await.context("get workflows")?;
 
-            // let mut total_workflows = page.items;
-
-            // while let Some(page) = client.client().get_page(&page.next).await? {
-            //     total_workflows.extend(page.items);
-            // }
-
-            // for workflow in total_workflows.into_iter().filter(|w| w.head_sha ==
-            // run_commit_sha) {     if workflow.conclusion.is_none() {
-            //         client
-            //             .client()
-            //             .post::<_, serde_json::Value>(
-            //                 format!(
-            //                     "/repos/{owner}/{repo}/actions/runs/{id}/cancel",
-            //                     owner = repo_owner.login,
-            //                     repo = repo.name,
-            //                     id = workflow.id
-            //                 ),
-            //                 None::<&()>,
-            //             )
-            //             .await?;
-            //         tracing::info!(
-            //             run_id = %run_id,
-            //             repo_id = %run.github_repo_id,
-            //             "cancelled workflow {id} on https://github.com/{owner}/{repo}/actions/runs/{id}",
-            //             owner = repo_owner.login,
-            //             repo = repo.name,
-            //             id = workflow.id
-            //         );
-            //     }
-            // }
+            for workflow in runs.into_iter().filter(|w| &w.head_sha == run_commit_sha) {
+                if workflow.conclusion.is_none() {
+                    if let Err(err) = repo.cancel_workflow_run(workflow.id).await {
+                        tracing::error!(
+                            run_id = %run.id,
+                            repo_id = %run.github_repo_id,
+                            url = repo.workflow_run_link(workflow.id),
+                            pr = repo.pr_link(run.github_pr_number as u64),
+                            "failed to cancel workflow: {err:#}",
+                        );
+                    } else {
+                        tracing::info!(
+                            run_id = %run.id,
+                            repo_id = %run.github_repo_id,
+                            url = repo.workflow_run_link(workflow.id),
+                            pr = repo.pr_link(run.github_pr_number as u64),
+                            "cancelled workflow",
+                        );
+                    }
+                }
+            }
 
             repo.delete_branch(&run.ci_branch).await?;
         }
@@ -702,14 +685,14 @@ mod tests {
     use std::time::Duration;
 
     use chrono::Utc;
-    use octocrab::models::RepositoryId;
+    use octocrab::models::{RepositoryId, RunId};
     use tokio::sync::mpsc;
 
     use super::*;
     use crate::database::ci_run::{InsertCiRun, UpdateCiRun};
     use crate::database::enums::{GithubPrMergeStatus, GithubPrStatus};
     use crate::github::config::{GitHubBrawlLabelsConfig, GitHubBrawlRepoConfig};
-    use crate::github::models::{CheckRunConclusion, CheckRunEvent, CheckRunStatus, Commit};
+    use crate::github::models::{CheckRunConclusion, CheckRunEvent, CheckRunStatus, Commit, WorkflowRun};
     use crate::github::repo::test_utils::{MockRepoAction, MockRepoClient};
 
     #[bon::builder]
@@ -2438,6 +2421,35 @@ mod tests {
 
             conn
         });
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::BranchWorkflows { branch, result } => {
+                assert_eq!(branch, "ci_branch");
+                result.send(Ok(vec![
+                    WorkflowRun {
+                        id: RunId(1),
+                        conclusion: None,
+                        head_sha: "run_commit_sha".to_string(),
+                        ..Default::default()
+                    },
+                    WorkflowRun {
+                        id: RunId(2),
+                        conclusion: None,
+                        head_sha: "not_run_commit_sha".to_string(),
+                        ..Default::default()
+                    },
+                ])).unwrap();
+            }
+            r => panic!("unexpected action: {:?} expected branch", r),
+        }
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::CancelWorkflowRun { run_id, result } => {
+                assert_eq!(run_id, RunId(1));
+                result.send(Ok(())).unwrap();
+            }
+            r => panic!("unexpected action: {:?} expected cancel workflow run", r),
+        }
 
         match rx.recv().await.unwrap() {
             MockRepoAction::DeleteBranch { branch, result } => {
