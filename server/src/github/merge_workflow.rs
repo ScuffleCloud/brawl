@@ -816,7 +816,7 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             added_labels: vec![],
-            auto_try: false,
+            auto_try_requested_by_id: None,
         };
 
         diesel::insert_into(crate::database::schema::github_pr::table)

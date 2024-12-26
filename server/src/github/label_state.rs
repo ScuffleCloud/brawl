@@ -38,7 +38,7 @@ fn desired_labels<'a>(
         _ => {}
     }
 
-    if pr.auto_try {
+    if pr.auto_try_requested_by_id.is_some() {
         labels.extend(config.auto_try_enabled.iter().map(|s| Cow::Borrowed(s.as_ref())));
     }
 
@@ -180,7 +180,7 @@ mod tests {
             assert_eq!(desired_labels(*status, *is_dry_run, &pr, &config), *expected);
         }
 
-        pr.auto_try = true;
+        pr.auto_try_requested_by_id = Some(1);
         assert_eq!(
             desired_labels(GithubCiRunStatus::Queued, false, &pr, &config),
             &["auto-try", "queued"]
@@ -241,7 +241,7 @@ mod tests {
         assert_eq!(labels_to_add, &["in_progress"]);
         assert_eq!(labels_to_remove, &["queued"]);
 
-        pr.auto_try = true;
+        pr.auto_try_requested_by_id = Some(1);
         let LabelsAdjustments {
             desired_labels,
             labels_to_add,

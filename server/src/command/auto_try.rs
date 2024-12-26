@@ -52,22 +52,34 @@ async fn handle_with_pr<R: GitHubRepoClient>(
 
     let db_pr = Pr::find(context.repo.id(), context.pr_number).get_result(conn).await?;
 
-    match (command.disable, db_pr.auto_try) {
-        (true, true) => {
-            db_pr.update().auto_try(false).build().query().execute(conn).await?;
+    match (command.disable, db_pr.auto_try_requested_by_id) {
+        (true, Some(_)) => {
+            db_pr
+                .update()
+                .auto_try_requested_by_id(None)
+                .build()
+                .query()
+                .execute(conn)
+                .await?;
 
             context
                 .repo
                 .send_message(context.pr_number, &messages::auto_try_disabled())
                 .await?;
         }
-        (false, false) => {
+        (false, None) => {
             if !command.force && pr.head.repo.is_none_or(|r| r.id != context.repo.id()) {
                 context.repo.send_message(context.pr_number, &messages::error_no_body("This PR is not from this repository, so auto-try cannot be enabled. To bypass this check, use force `?brawl auto-try force`")).await?;
                 return Ok(());
             }
 
-            db_pr.update().auto_try(true).build().query().execute(conn).await?;
+            db_pr
+                .update()
+                .auto_try_requested_by_id(Some(context.user.id.0 as i64))
+                .build()
+                .query()
+                .execute(conn)
+                .await?;
 
             context
                 .repo

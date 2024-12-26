@@ -61,31 +61,34 @@ pub async fn handle_with_pr<R: GitHubRepoClient>(
                     )
                     .await?;
                 }
-                Some(run) if current.auto_try && commit_head_changed && run.is_dry_run => {
-                    repo.merge_workflow().cancel(run, repo, conn, &current).await?;
-                }
                 _ => {}
             }
 
-            if current.auto_try && commit_head_changed && run.is_none_or(|r| r.is_dry_run) {
-                tracing::info!(
-                    "starting auto-try because head changed from {} to {}",
-                    current_head_sha,
-                    pr.head.sha
-                );
-                let run = CiRun::insert(repo.id(), pr.number)
-                    .base_ref(Base::from_pr(&pr))
-                    .head_commit_sha(pr.head.sha.as_str().into())
-                    .ci_branch(repo.config().try_branch(pr.number).into())
-                    .requested_by_id(pr.head.user.as_ref().map(|u| u.id.0 as i64).unwrap_or(user.id.0 as i64))
-                    .approved_by_ids(vec![])
-                    .is_dry_run(true)
-                    .build()
-                    .query()
-                    .get_result(conn)
-                    .await?;
+            if let Some(requested_by_id) = current.auto_try_requested_by_id {
+                if commit_head_changed && run.as_ref().is_none_or(|r| r.is_dry_run) {
+                    if let Some(run) = &run {
+                        repo.merge_workflow().cancel(run, repo, conn, &current).await?;
+                    }
 
-                repo.merge_workflow().start(&run, repo, conn, &current).await?;
+                    tracing::info!(
+                        "starting auto-try because head changed from {} to {}",
+                        current_head_sha,
+                        pr.head.sha
+                    );
+                    let run = CiRun::insert(repo.id(), pr.number)
+                        .base_ref(Base::from_pr(&pr))
+                        .head_commit_sha(pr.head.sha.as_str().into())
+                        .ci_branch(repo.config().try_branch(pr.number).into())
+                        .requested_by_id(requested_by_id)
+                        .approved_by_ids(vec![])
+                        .is_dry_run(true)
+                        .build()
+                        .query()
+                        .get_result(conn)
+                        .await?;
+
+                    repo.merge_workflow().start(&run, repo, conn, &current).await?;
+                }
             }
         }
     } else {
