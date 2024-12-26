@@ -51,6 +51,8 @@ pub struct PrBranch {
     pub label: Option<String>,
     pub ref_field: String,
     pub sha: String,
+    pub user: Option<User>,
+    pub repo: Option<Repository>,
 }
 
 impl From<octocrab::models::pulls::Head> for PrBranch {
@@ -59,6 +61,8 @@ impl From<octocrab::models::pulls::Head> for PrBranch {
             label: value.label,
             ref_field: value.ref_field,
             sha: value.sha,
+            user: value.user.map(|u| u.into()),
+            repo: value.repo.map(|r| r.into()),
         }
     }
 }
@@ -69,6 +73,8 @@ impl From<octocrab::models::pulls::Base> for PrBranch {
             label: value.label,
             ref_field: value.ref_field,
             sha: value.sha,
+            user: value.user.map(|u| u.into()),
+            repo: value.repo.map(|r| r.into()),
         }
     }
 }

@@ -33,6 +33,7 @@ pub struct Pr<'a> {
     pub added_labels: Vec<Cow<'a, str>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub auto_try_requested_by_id: Option<i64>,
 }
 
 #[derive(AsChangeset, Identifiable, Clone, bon::Builder)]
@@ -53,6 +54,7 @@ pub struct UpdatePr<'a> {
     pub merge_commit_sha: Option<Option<Cow<'a, str>>>,
     pub target_branch: Option<Cow<'a, str>>,
     pub latest_commit_sha: Option<Cow<'a, str>>,
+    pub auto_try_requested_by_id: Option<Option<i64>>,
     #[builder(default = chrono::Utc::now())]
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -64,6 +66,34 @@ impl UpdatePr<'_> {
     pub fn with_updated_at(mut self, updated_at: chrono::DateTime<chrono::Utc>) -> Self {
         self.updated_at = updated_at;
         self
+    }
+}
+
+impl<'a> UpdatePr<'a> {
+    pub fn update_pr(self, pr: &mut Pr<'a>) {
+        if self.needs_update() {
+            pr.updated_at = self.updated_at;
+        }
+
+        macro_rules! update_if_some {
+            ($field:expr, $value:expr) => {
+                if let Some(value) = $value {
+                    $field = value;
+                }
+            };
+        }
+
+        update_if_some!(pr.added_labels, self.added_labels);
+        update_if_some!(pr.title, self.title);
+        update_if_some!(pr.body, self.body);
+        update_if_some!(pr.merge_status, self.merge_status);
+        update_if_some!(pr.assigned_ids, self.assigned_ids);
+        update_if_some!(pr.status, self.status);
+        update_if_some!(pr.default_priority, self.default_priority);
+        update_if_some!(pr.merge_commit_sha, self.merge_commit_sha);
+        update_if_some!(pr.target_branch, self.target_branch);
+        update_if_some!(pr.latest_commit_sha, self.latest_commit_sha);
+        update_if_some!(pr.auto_try_requested_by_id, self.auto_try_requested_by_id);
     }
 }
 
@@ -107,14 +137,15 @@ impl<'a> Pr<'a> {
             author_id: pr.user.as_ref().map(|u| u.id.0 as i64).unwrap_or(user_id.0 as i64),
             assigned_ids: pr_assigned_ids(pr),
             status: pr_status(pr),
-            default_priority: None,
             merge_commit_sha: pr.merged_at.and_then(|_| pr.merge_commit_sha.as_deref().map(Cow::Borrowed)),
             target_branch: Cow::Borrowed(&pr.base.ref_field),
             source_branch: Cow::Borrowed(&pr.head.ref_field),
             latest_commit_sha: Cow::Borrowed(&pr.head.sha),
-            added_labels: Vec::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            default_priority: None,
+            added_labels: Vec::new(),
+            auto_try_requested_by_id: None,
         }
     }
 
@@ -141,13 +172,14 @@ impl<'a> Pr<'a> {
                 title: Some(Cow::Borrowed(self.title.as_ref())),
                 body: Some(Cow::Borrowed(self.body.as_ref())),
                 merge_status: Some(self.merge_status),
-                added_labels: Some(self.added_labels.clone()),
                 assigned_ids: Some(self.assigned_ids.clone()),
                 status: Some(self.status),
-                default_priority: Some(self.default_priority),
                 merge_commit_sha: Some(self.merge_commit_sha.as_deref().map(Cow::Borrowed)),
                 target_branch: Some(Cow::Borrowed(self.target_branch.as_ref())),
                 latest_commit_sha: Some(Cow::Borrowed(self.latest_commit_sha.as_ref())),
+                default_priority: None,
+                added_labels: None,
+                auto_try_requested_by_id: None,
                 updated_at: self.updated_at,
             })
             .returning(Pr::as_select())
@@ -162,7 +194,7 @@ impl<'a> Pr<'a> {
         UpdatePr::builder(self.github_repo_id, self.github_pr_number)
     }
 
-    pub fn update_from(&'a self, new: &'a PullRequest) -> UpdatePr<'a> {
+    pub fn update_from(&self, new: &'a PullRequest) -> UpdatePr<'a> {
         let title = Cow::Borrowed(new.title.as_str());
         let body = Cow::Borrowed(new.body.as_str());
         let merge_status = pr_merge_status(new);
@@ -242,7 +274,8 @@ mod tests {
       "github_pr"."latest_commit_sha",
       "github_pr"."added_labels",
       "github_pr"."created_at",
-      "github_pr"."updated_at"
+      "github_pr"."updated_at",
+      "github_pr"."auto_try_requested_by_id"
     FROM
       "github_pr"
     WHERE
@@ -272,6 +305,7 @@ mod tests {
             merge_status: GithubPrMergeStatus::NotReady,
             status: GithubPrStatus::Open,
             merge_commit_sha: None,
+            auto_try_requested_by_id: None,
         }),
         expected: @r#"
     INSERT INTO
@@ -291,7 +325,8 @@ mod tests {
         "latest_commit_sha",
         "added_labels",
         "created_at",
-        "updated_at"
+        "updated_at",
+        "auto_try_requested_by_id"
       )
     VALUES
       (
@@ -310,7 +345,8 @@ mod tests {
         $11,
         $12,
         $13,
-        $14
+        $14,
+        DEFAULT
       ) -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", [], 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z]
     "#,
     }
@@ -376,6 +412,7 @@ mod tests {
             merge_status: GithubPrMergeStatus::NotReady,
             status: GithubPrStatus::Open,
             merge_commit_sha: None,
+            auto_try_requested_by_id: None,
         }),
         expected: @r#"
     INSERT INTO
@@ -395,7 +432,8 @@ mod tests {
         "latest_commit_sha",
         "added_labels",
         "created_at",
-        "updated_at"
+        "updated_at",
+        "auto_try_requested_by_id"
       )
     VALUES
       (
@@ -414,21 +452,20 @@ mod tests {
         $11,
         $12,
         $13,
-        $14
+        $14,
+        DEFAULT
       ) ON CONFLICT ("github_repo_id", "github_pr_number") DO
     UPDATE
     SET
-      "added_labels" = $15,
-      "title" = $16,
-      "body" = $17,
-      "merge_status" = $18,
-      "assigned_ids" = $19,
-      "status" = $20,
-      "default_priority" = $21,
-      "merge_commit_sha" = $22,
-      "target_branch" = $23,
-      "latest_commit_sha" = $24,
-      "updated_at" = $25
+      "title" = $15,
+      "body" = $16,
+      "merge_status" = $17,
+      "assigned_ids" = $18,
+      "status" = $19,
+      "merge_commit_sha" = $20,
+      "target_branch" = $21,
+      "latest_commit_sha" = $22,
+      "updated_at" = $23
     RETURNING
       "github_pr"."github_repo_id",
       "github_pr"."github_pr_number",
@@ -445,7 +482,8 @@ mod tests {
       "github_pr"."latest_commit_sha",
       "github_pr"."added_labels",
       "github_pr"."created_at",
-      "github_pr"."updated_at" -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", [], 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z, [], "test", "test", NotReady, [], Open, None, None, "test", "test", 2024-06-20T02:40:00Z]
+      "github_pr"."updated_at",
+      "github_pr"."auto_try_requested_by_id" -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", [], 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z, "test", "test", NotReady, [], Open, None, "test", "test", 2024-06-20T02:40:00Z]
     "#,
     }
 
@@ -536,6 +574,7 @@ mod tests {
             merge_commit_sha: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            auto_try_requested_by_id: None,
         }
         .insert()
         .execute(&mut conn)
@@ -567,6 +606,7 @@ mod tests {
             merge_commit_sha: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            auto_try_requested_by_id: None,
         }
         .insert()
         .execute(&mut conn)
@@ -606,6 +646,7 @@ mod tests {
             merge_commit_sha: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            auto_try_requested_by_id: None,
         }
         .insert()
         .execute(&mut conn)

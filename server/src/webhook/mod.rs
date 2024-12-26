@@ -6,7 +6,7 @@ use anyhow::Context;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::{Json, RequestExt};
-use diesel_async::AsyncPgConnection;
+use diesel_async::{AsyncConnection, AsyncPgConnection};
 use octocrab::models::{InstallationId, RepositoryId};
 use parse::{parse_from_request, WebhookEventAction};
 use scuffle_context::ContextFutExt;
@@ -152,15 +152,23 @@ async fn handle_webhook_action(global: &impl WebhookConfig, action: WebhookEvent
                 return Err(anyhow::anyhow!("repo client not found"));
             };
 
-            command
-                .handle(
-                    global.database().await?.deref_mut(),
-                    BrawlCommandContext {
-                        repo: repo_client.as_ref(),
-                        user,
-                        pr_number,
-                    },
-                )
+            global
+                .database()
+                .await?
+                .transaction(|conn| {
+                    Box::pin(async move {
+                        command
+                            .handle(
+                                conn,
+                                BrawlCommandContext {
+                                    repo: repo_client.as_ref(),
+                                    user,
+                                    pr_number,
+                                },
+                            )
+                            .await
+                    })
+                })
                 .await?;
 
             Ok(())
@@ -175,7 +183,14 @@ async fn handle_webhook_action(global: &impl WebhookConfig, action: WebhookEvent
                 return Err(anyhow::anyhow!("repo client not found"));
             };
 
-            pull_request::handle(repo_client.as_ref(), global.database().await?.deref_mut(), pr_number, user).await?;
+            global
+                .database()
+                .await?
+                .transaction(|conn| {
+                    Box::pin(async move { pull_request::handle(repo_client.as_ref(), conn, pr_number, user).await })
+                })
+                .await?;
+
             Ok(())
         }
         WebhookEventAction::CheckRun {
@@ -187,7 +202,13 @@ async fn handle_webhook_action(global: &impl WebhookConfig, action: WebhookEvent
                 return Err(anyhow::anyhow!("repo client not found"));
             };
 
-            check_event::handle(repo_client.as_ref(), global.database().await?.deref_mut(), check_run).await?;
+            global
+                .database()
+                .await?
+                .transaction(|conn| {
+                    Box::pin(async move { check_event::handle(repo_client.as_ref(), conn, check_run).await })
+                })
+                .await?;
 
             Ok(())
         }

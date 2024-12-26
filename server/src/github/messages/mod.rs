@@ -9,6 +9,8 @@ pub enum IssueMessage {
     TestsTimeout(String),
     TestsStart(String),
     Pong(String),
+    AutoTryEnabled(String),
+    AutoTryDisabled(String),
 }
 
 impl AsRef<str> for IssueMessage {
@@ -23,6 +25,8 @@ impl AsRef<str> for IssueMessage {
             IssueMessage::TestsTimeout(s) => s.as_ref(),
             IssueMessage::TestsStart(s) => s.as_ref(),
             IssueMessage::Pong(s) => s.as_ref(),
+            IssueMessage::AutoTryEnabled(s) => s.as_ref(),
+            IssueMessage::AutoTryDisabled(s) => s.as_ref(),
         }
     }
 }
@@ -163,4 +167,12 @@ pub fn tests_start(head_sha_link: impl std::fmt::Display, base_sha_link: impl st
 
 pub fn pong(username: impl std::fmt::Display, status: impl std::fmt::Display) -> IssueMessage {
     IssueMessage::Pong(format!(include_str!("pong.md"), username = username, status = status,))
+}
+
+pub fn auto_try_enabled(requested_by: impl std::fmt::Display) -> IssueMessage {
+    IssueMessage::AutoTryEnabled(format!(include_str!("auto_try_enabled.md"), requested_by = requested_by))
+}
+
+pub fn auto_try_disabled() -> IssueMessage {
+    IssueMessage::AutoTryDisabled(include_str!("auto_try_disabled.md").to_string())
 }

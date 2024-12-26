@@ -8,30 +8,44 @@ use super::repo::GitHubRepoClient;
 use crate::database::enums::GithubCiRunStatus;
 use crate::database::pr::Pr;
 
-fn desired_labels(status: GithubCiRunStatus, is_dry_run: bool, config: &GitHubBrawlLabelsConfig) -> &[String] {
+fn desired_labels<'a>(
+    status: GithubCiRunStatus,
+    is_dry_run: bool,
+    pr: &Pr<'_>,
+    config: &'a GitHubBrawlLabelsConfig,
+) -> Vec<Cow<'a, str>> {
+    let mut labels = Vec::new();
+
     match (status, is_dry_run) {
         (GithubCiRunStatus::Queued, false) => {
-            return &config.on_merge_queued;
+            labels.extend(config.on_merge_queued.iter().map(|s| Cow::Borrowed(s.as_ref())));
         }
         (GithubCiRunStatus::InProgress, true) => {
-            return &config.on_try_in_progress;
+            labels.extend(config.on_try_in_progress.iter().map(|s| Cow::Borrowed(s.as_ref())));
         }
         (GithubCiRunStatus::InProgress, false) => {
-            return &config.on_merge_in_progress;
+            labels.extend(config.on_merge_in_progress.iter().map(|s| Cow::Borrowed(s.as_ref())));
         }
         (GithubCiRunStatus::Failure, true) => {
-            return &config.on_try_failure;
+            labels.extend(config.on_try_failure.iter().map(|s| Cow::Borrowed(s.as_ref())));
         }
         (GithubCiRunStatus::Failure, false) => {
-            return &config.on_merge_failure;
+            labels.extend(config.on_merge_failure.iter().map(|s| Cow::Borrowed(s.as_ref())));
         }
         (GithubCiRunStatus::Success, false) => {
-            return &config.on_merge_success;
+            labels.extend(config.on_merge_success.iter().map(|s| Cow::Borrowed(s.as_ref())));
         }
         _ => {}
     }
 
-    &[]
+    if pr.auto_try_requested_by_id.is_some() {
+        labels.extend(config.auto_try_enabled.iter().map(|s| Cow::Borrowed(s.as_ref())));
+    }
+
+    labels.sort();
+    labels.dedup();
+
+    labels
 }
 
 struct LabelsAdjustments<'a> {
@@ -46,13 +60,7 @@ fn get_adjustments<'a>(
     is_dry_run: bool,
     config: &'a GitHubBrawlLabelsConfig,
 ) -> LabelsAdjustments<'a> {
-    let mut desired_labels = desired_labels(status, is_dry_run, config)
-        .iter()
-        .map(|s| Cow::Borrowed(s.as_ref()))
-        .collect::<Vec<Cow<'a, str>>>();
-
-    desired_labels.sort();
-    desired_labels.dedup();
+    let desired_labels = desired_labels(status, is_dry_run, pr, config);
 
     let desired_labels_set = desired_labels.iter().cloned().collect::<HashSet<Cow<'a, str>>>();
 
@@ -151,22 +159,32 @@ mod tests {
             on_try_failure: vec!["try".to_string(), "failure".to_string()],
             on_merge_failure: vec!["merge".to_string(), "failure".to_string()],
             on_merge_success: vec!["merge".to_string(), "success".to_string()],
+            auto_try_enabled: vec!["auto-try".to_string()],
         };
 
         let cases: &[(GithubCiRunStatus, bool, &[&str])] = &[
             (GithubCiRunStatus::Queued, false, &["queued"]),
-            (GithubCiRunStatus::InProgress, false, &["merge", "in_progress"]),
-            (GithubCiRunStatus::InProgress, true, &["try", "in_progress"]),
-            (GithubCiRunStatus::Failure, false, &["merge", "failure"]),
-            (GithubCiRunStatus::Failure, true, &["try", "failure"]),
+            (GithubCiRunStatus::InProgress, false, &["in_progress", "merge"]),
+            (GithubCiRunStatus::InProgress, true, &["in_progress", "try"]),
+            (GithubCiRunStatus::Failure, false, &["failure", "merge"]),
+            (GithubCiRunStatus::Failure, true, &["failure", "try"]),
             (GithubCiRunStatus::Success, false, &["merge", "success"]),
             (GithubCiRunStatus::Cancelled, false, &[]),
             (GithubCiRunStatus::Cancelled, true, &[]),
         ];
 
+        let pr = PullRequest::default();
+        let mut pr = Pr::new(&pr, UserId(1), RepositoryId(1));
+
         for (status, is_dry_run, expected) in cases {
-            assert_eq!(desired_labels(*status, *is_dry_run, &config), *expected);
+            assert_eq!(desired_labels(*status, *is_dry_run, &pr, &config), *expected);
         }
+
+        pr.auto_try_requested_by_id = Some(1);
+        assert_eq!(
+            desired_labels(GithubCiRunStatus::Queued, false, &pr, &config),
+            &["auto-try", "queued"]
+        );
     }
 
     #[test]
@@ -181,6 +199,7 @@ mod tests {
             on_try_failure: vec!["try".to_string(), "failure".to_string()],
             on_merge_failure: vec!["merge".to_string(), "failure".to_string()],
             on_merge_success: vec!["merge".to_string(), "success".to_string()],
+            auto_try_enabled: vec!["auto-try".to_string()],
         };
 
         let LabelsAdjustments {
@@ -221,6 +240,16 @@ mod tests {
         assert_eq!(desired_labels, &["in_progress", "merge"]);
         assert_eq!(labels_to_add, &["in_progress"]);
         assert_eq!(labels_to_remove, &["queued"]);
+
+        pr.auto_try_requested_by_id = Some(1);
+        let LabelsAdjustments {
+            desired_labels,
+            labels_to_add,
+            labels_to_remove,
+        } = get_adjustments(&pr, GithubCiRunStatus::InProgress, false, &config);
+        assert_eq!(desired_labels, &["auto-try", "in_progress", "merge"]);
+        assert_eq!(labels_to_add, &["auto-try", "in_progress"]);
+        assert_eq!(labels_to_remove, &["queued"]);
     }
 
     #[tokio::test]
@@ -245,6 +274,7 @@ mod tests {
             on_try_failure: vec!["try".to_string(), "failure".to_string()],
             on_merge_failure: vec!["merge".to_string(), "failure".to_string()],
             on_merge_success: vec!["merge".to_string(), "success".to_string()],
+            auto_try_enabled: vec!["auto-try".to_string()],
         };
 
         let pr_number = pr.github_pr_number as u64;
@@ -384,6 +414,7 @@ mod tests {
             on_try_failure: vec!["try".to_string(), "failure".to_string()],
             on_merge_failure: vec!["merge".to_string(), "failure".to_string()],
             on_merge_success: vec!["merge".to_string(), "success".to_string()],
+            auto_try_enabled: vec!["auto-try".to_string()],
         };
 
         let pr_number = pr.github_pr_number as u64;

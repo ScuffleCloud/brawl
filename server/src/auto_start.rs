@@ -313,6 +313,11 @@ mod tests {
         .await
         .unwrap();
 
+        diesel::delete(crate::database::schema::github_ci_runs::table)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
         CiRun::insert(RepositoryId(1), 1)
             .priority(1)
             .requested_by_id(1)
