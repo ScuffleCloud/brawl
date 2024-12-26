@@ -2470,6 +2470,143 @@ mod tests {
         assert!(run.started_at.is_some());
     }
 
+    #[tokio::test]
+    async fn test_ci_run_cancel_started_no_runs() {
+        let (mut conn, client, pr, run, mut rx) = ci_run_test_boilerplate(
+            InsertCiRun::builder(1, 1)
+                .base_ref(Base::Commit(Cow::Borrowed("sha")))
+                .head_commit_sha(Cow::Borrowed("head_commit_sha"))
+                .ci_branch(Cow::Borrowed("ci_branch"))
+                .is_dry_run(false)
+                .requested_by_id(1)
+                .approved_by_ids(vec![1])
+                .build(),
+        )
+        .await;
+
+        UpdateCiRun::builder(run.id)
+            .status(GithubCiRunStatus::InProgress)
+            .started_at(Utc::now())
+            .run_commit_sha(Cow::Borrowed("run_commit_sha"))
+            .build()
+            .query()
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+        let run = CiRun::latest(RepositoryId(1), 1).get_result(&mut conn).await.unwrap();
+
+        let task = tokio::spawn(async move {
+            client.merge_workflow().cancel(&run, &client, &mut conn, &pr).await.unwrap();
+
+            conn
+        });
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::BranchWorkflows { branch, result } => {
+                assert_eq!(branch, "ci_branch");
+                result.send(Ok(vec![])).unwrap();
+            }
+            r => panic!("unexpected action: {:?} expected branch", r),
+        }
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::DeleteBranch { branch, result } => {
+                assert_eq!(branch, "ci_branch");
+                result.send(Ok(())).unwrap();
+            }
+            r => panic!("unexpected action: {:?} expected delete branch", r),
+        }
+
+        let mut conn = task.await.unwrap();
+
+        let run = CiRun::latest(RepositoryId(1), 1).get_result(&mut conn).await.unwrap();
+        assert_eq!(run.status, GithubCiRunStatus::Cancelled);
+        assert!(run.completed_at.is_some());
+        assert!(run.run_commit_sha.is_some());
+        assert!(run.started_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_ci_run_cancel_cancel_fail() {
+        let (mut conn, client, pr, run, mut rx) = ci_run_test_boilerplate(
+            InsertCiRun::builder(1, 1)
+                .base_ref(Base::Commit(Cow::Borrowed("sha")))
+                .head_commit_sha(Cow::Borrowed("head_commit_sha"))
+                .ci_branch(Cow::Borrowed("ci_branch"))
+                .is_dry_run(false)
+                .requested_by_id(1)
+                .approved_by_ids(vec![1])
+                .build(),
+        )
+        .await;
+
+        UpdateCiRun::builder(run.id)
+            .status(GithubCiRunStatus::InProgress)
+            .started_at(Utc::now())
+            .run_commit_sha(Cow::Borrowed("run_commit_sha"))
+            .build()
+            .query()
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+        let run = CiRun::latest(RepositoryId(1), 1).get_result(&mut conn).await.unwrap();
+
+        let task = tokio::spawn(async move {
+            client.merge_workflow().cancel(&run, &client, &mut conn, &pr).await.unwrap();
+
+            conn
+        });
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::BranchWorkflows { branch, result } => {
+                assert_eq!(branch, "ci_branch");
+                result
+                    .send(Ok(vec![
+                        WorkflowRun {
+                            id: RunId(1),
+                            conclusion: None,
+                            head_sha: "run_commit_sha".to_string(),
+                            ..Default::default()
+                        },
+                        WorkflowRun {
+                            id: RunId(2),
+                            conclusion: None,
+                            head_sha: "not_run_commit_sha".to_string(),
+                            ..Default::default()
+                        },
+                    ]))
+                    .unwrap();
+            }
+            r => panic!("unexpected action: {:?} expected branch", r),
+        }
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::CancelWorkflowRun { run_id, result } => {
+                assert_eq!(run_id, RunId(1));
+                result.send(Err(anyhow::anyhow!("failed to cancel"))).unwrap();
+            }
+            r => panic!("unexpected action: {:?} expected cancel workflow run", r),
+        }
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::DeleteBranch { branch, result } => {
+                assert_eq!(branch, "ci_branch");
+                result.send(Ok(())).unwrap();
+            }
+            r => panic!("unexpected action: {:?} expected delete branch", r),
+        }
+
+        let mut conn = task.await.unwrap();
+
+        let run = CiRun::latest(RepositoryId(1), 1).get_result(&mut conn).await.unwrap();
+        assert_eq!(run.status, GithubCiRunStatus::Cancelled);
+        assert!(run.completed_at.is_some());
+        assert!(run.run_commit_sha.is_some());
+        assert!(run.started_at.is_some());
+    }
+
     #[test]
     fn test_format_duration() {
         insta::assert_snapshot!(format_duration(chrono::Duration::seconds(1)), @"1s");
