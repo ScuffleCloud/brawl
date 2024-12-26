@@ -68,7 +68,11 @@ pub async fn handle_with_pr<R: GitHubRepoClient>(
             }
 
             if current.auto_try && commit_head_changed && run.is_none_or(|r| r.is_dry_run) {
-                tracing::info!("starting auto-try because head changed from {} to {}", current_head_sha, pr.head.sha);
+                tracing::info!(
+                    "starting auto-try because head changed from {} to {}",
+                    current_head_sha,
+                    pr.head.sha
+                );
                 let run = CiRun::insert(repo.id(), pr.number)
                     .base_ref(Base::from_pr(&pr))
                     .head_commit_sha(pr.head.sha.as_str().into())
