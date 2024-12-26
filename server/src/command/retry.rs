@@ -83,7 +83,7 @@ async fn handle_with_pr<R: GitHubRepoClient>(
     if run.is_dry_run {
         context.repo.merge_workflow().start(&run, context.repo, conn, &db_pr).await?;
     } else {
-        context.repo.merge_workflow().queued(&run, context.repo).await?;
+        context.repo.merge_workflow().queued(&run, context.repo, conn, &db_pr).await?;
     }
 
     Ok(())
@@ -132,7 +132,13 @@ mod tests {
             Ok(true)
         }
 
-        async fn queued(&self, _: &CiRun<'_>, _: &impl GitHubRepoClient) -> anyhow::Result<()> {
+        async fn queued(
+            &self,
+            _: &CiRun<'_>,
+            _: &impl GitHubRepoClient,
+            _: &mut AsyncPgConnection,
+            _: &Pr<'_>,
+        ) -> anyhow::Result<()> {
             self.queued
                 .compare_exchange(
                     false,

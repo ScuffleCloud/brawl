@@ -9,6 +9,7 @@ use octocrab::Octocrab;
 
 pub mod config;
 pub mod installation;
+pub mod label_state;
 pub mod merge_workflow;
 pub mod messages;
 pub mod models;

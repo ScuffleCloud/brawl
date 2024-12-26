@@ -1,3 +1,4 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(all(coverage_nightly, test), coverage(off))]
 
 use std::net::SocketAddr;
@@ -162,12 +163,12 @@ impl scuffle_bootstrap_telemetry::TelemetryConfig for Global {
 }
 
 impl scuffle_brawl::webhook::WebhookConfig for Global {
-    fn bind_address(&self) -> Option<SocketAddr> {
-        Some(self.config.github.webhook_bind)
-    }
-
     fn webhook_secret(&self) -> &str {
         &self.config.github.webhook_secret
+    }
+
+    fn bind_address(&self) -> Option<SocketAddr> {
+        Some(self.config.github.webhook_bind)
     }
 
     fn get_repo(
@@ -196,13 +197,13 @@ impl scuffle_brawl::webhook::WebhookConfig for Global {
         Ok(())
     }
 
-    fn delete_installation(&self, installation_id: InstallationId) -> anyhow::Result<()> {
-        self.github_service.delete_installation(installation_id);
+    async fn update_installation(&self, installation: Installation) -> anyhow::Result<()> {
+        self.github_service.update_installation(installation).await?;
         Ok(())
     }
 
-    async fn update_installation(&self, installation: Installation) -> anyhow::Result<()> {
-        self.github_service.update_installation(installation).await?;
+    fn delete_installation(&self, installation_id: InstallationId) -> anyhow::Result<()> {
+        self.github_service.delete_installation(installation_id);
         Ok(())
     }
 

@@ -30,6 +30,7 @@ pub struct Pr<'a> {
     pub target_branch: Cow<'a, str>,
     pub source_branch: Cow<'a, str>,
     pub latest_commit_sha: Cow<'a, str>,
+    pub added_labels: Vec<Cow<'a, str>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -42,6 +43,7 @@ pub struct UpdatePr<'a> {
     pub github_repo_id: i64,
     #[builder(start_fn)]
     pub github_pr_number: i32,
+    pub added_labels: Option<Vec<Cow<'a, str>>>,
     pub title: Option<Cow<'a, str>>,
     pub body: Option<Cow<'a, str>>,
     pub merge_status: Option<GithubPrMergeStatus>,
@@ -110,6 +112,7 @@ impl<'a> Pr<'a> {
             target_branch: Cow::Borrowed(&pr.base.ref_field),
             source_branch: Cow::Borrowed(&pr.head.ref_field),
             latest_commit_sha: Cow::Borrowed(&pr.head.sha),
+            added_labels: Vec::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }
@@ -138,6 +141,7 @@ impl<'a> Pr<'a> {
                 title: Some(Cow::Borrowed(self.title.as_ref())),
                 body: Some(Cow::Borrowed(self.body.as_ref())),
                 merge_status: Some(self.merge_status),
+                added_labels: Some(self.added_labels.clone()),
                 assigned_ids: Some(self.assigned_ids.clone()),
                 status: Some(self.status),
                 default_priority: Some(self.default_priority),
@@ -236,6 +240,7 @@ mod tests {
       "github_pr"."target_branch",
       "github_pr"."source_branch",
       "github_pr"."latest_commit_sha",
+      "github_pr"."added_labels",
       "github_pr"."created_at",
       "github_pr"."updated_at"
     FROM
@@ -263,6 +268,7 @@ mod tests {
             latest_commit_sha: Cow::Borrowed("test"),
             source_branch: Cow::Borrowed("test"),
             target_branch: Cow::Borrowed("test"),
+            added_labels: vec![],
             merge_status: GithubPrMergeStatus::NotReady,
             status: GithubPrStatus::Open,
             merge_commit_sha: None,
@@ -283,6 +289,7 @@ mod tests {
         "target_branch",
         "source_branch",
         "latest_commit_sha",
+        "added_labels",
         "created_at",
         "updated_at"
       )
@@ -302,8 +309,9 @@ mod tests {
         $10,
         $11,
         $12,
-        $13
-      ) -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z]
+        $13,
+        $14
+      ) -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", [], 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z]
     "#,
     }
 
@@ -360,6 +368,7 @@ mod tests {
             updated_at: chrono::DateTime::from_timestamp_nanos(1718851200000000000),
             assigned_ids: vec![],
             author_id: 0,
+            added_labels: vec![],
             default_priority: None,
             latest_commit_sha: Cow::Borrowed("test"),
             source_branch: Cow::Borrowed("test"),
@@ -384,6 +393,7 @@ mod tests {
         "target_branch",
         "source_branch",
         "latest_commit_sha",
+        "added_labels",
         "created_at",
         "updated_at"
       )
@@ -403,20 +413,22 @@ mod tests {
         $10,
         $11,
         $12,
-        $13
+        $13,
+        $14
       ) ON CONFLICT ("github_repo_id", "github_pr_number") DO
     UPDATE
     SET
-      "title" = $14,
-      "body" = $15,
-      "merge_status" = $16,
-      "assigned_ids" = $17,
-      "status" = $18,
-      "default_priority" = $19,
-      "merge_commit_sha" = $20,
-      "target_branch" = $21,
-      "latest_commit_sha" = $22,
-      "updated_at" = $23
+      "added_labels" = $15,
+      "title" = $16,
+      "body" = $17,
+      "merge_status" = $18,
+      "assigned_ids" = $19,
+      "status" = $20,
+      "default_priority" = $21,
+      "merge_commit_sha" = $22,
+      "target_branch" = $23,
+      "latest_commit_sha" = $24,
+      "updated_at" = $25
     RETURNING
       "github_pr"."github_repo_id",
       "github_pr"."github_pr_number",
@@ -431,8 +443,9 @@ mod tests {
       "github_pr"."target_branch",
       "github_pr"."source_branch",
       "github_pr"."latest_commit_sha",
+      "github_pr"."added_labels",
       "github_pr"."created_at",
-      "github_pr"."updated_at" -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z, "test", "test", NotReady, [], Open, None, None, "test", "test", 2024-06-20T02:40:00Z]
+      "github_pr"."updated_at" -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", [], 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z, [], "test", "test", NotReady, [], Open, None, None, "test", "test", 2024-06-20T02:40:00Z]
     "#,
     }
 
@@ -516,6 +529,7 @@ mod tests {
             title: Cow::Borrowed("test"),
             assigned_ids: vec![],
             author_id: 0,
+            added_labels: vec![],
             default_priority: None,
             merge_status: GithubPrMergeStatus::NotReady,
             status: GithubPrStatus::Open,
@@ -547,6 +561,7 @@ mod tests {
             assigned_ids: vec![],
             author_id: 0,
             default_priority: None,
+            added_labels: vec![],
             merge_status: GithubPrMergeStatus::NotReady,
             status: GithubPrStatus::Open,
             merge_commit_sha: None,
@@ -584,6 +599,7 @@ mod tests {
             title: Cow::Borrowed("test"),
             assigned_ids: vec![],
             author_id: 0,
+            added_labels: vec![],
             default_priority: None,
             merge_status: GithubPrMergeStatus::NotReady,
             status: GithubPrStatus::Open,
@@ -674,7 +690,7 @@ mod tests {
         .unwrap();
 
         pr.update()
-            .body("test2".into())
+            .body(Cow::Borrowed("test2"))
             .build()
             .query()
             .execute(&mut conn)
