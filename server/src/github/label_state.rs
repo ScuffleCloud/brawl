@@ -359,4 +359,101 @@ mod tests {
         let pr = Pr::find(RepositoryId(1), pr_number).get_result(&mut conn).await.unwrap();
         assert_eq!(pr.added_labels, vec!["in_progress", "merge"]);
     }
+
+    #[tokio::test]
+    async fn test_update_labels_failure() {
+        let mut conn = get_test_connection().await;
+        let pr = PullRequest::default();
+        let mut pr = Pr::new(&pr, UserId(1), RepositoryId(1));
+
+        pr.added_labels = vec![Cow::Borrowed("some_label"), Cow::Borrowed("other_label")];
+
+        pr.insert().execute(&mut conn).await.unwrap();
+
+        let pr = Pr::find(RepositoryId(1), pr.github_pr_number as u64)
+            .get_result(&mut conn)
+            .await
+            .unwrap();
+
+        let (mut repo_client, mut rx) = MockRepoClient::new(DefaultMergeWorkflow);
+
+        repo_client.config.labels = GitHubBrawlLabelsConfig {
+            on_merge_queued: vec!["queued".to_string()],
+            on_try_in_progress: vec!["try".to_string(), "in_progress".to_string()],
+            on_merge_in_progress: vec!["merge".to_string(), "in_progress".to_string()],
+            on_try_failure: vec!["try".to_string(), "failure".to_string()],
+            on_merge_failure: vec!["merge".to_string(), "failure".to_string()],
+            on_merge_success: vec!["merge".to_string(), "success".to_string()],
+        };
+
+        let pr_number = pr.github_pr_number as u64;
+
+        let task = tokio::spawn(async move {
+            update_labels(&mut conn, &pr, GithubCiRunStatus::InProgress, false, &repo_client)
+                .await
+                .unwrap();
+            (conn, repo_client)
+        });
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::AddLabels {
+                issue_number,
+                labels,
+                result,
+            } => {
+                assert_eq!(issue_number, pr_number);
+                assert_eq!(labels, vec!["in_progress".to_string()]);
+                result
+                    .send(Err(anyhow::anyhow!("failed to add labels")))
+                    .expect("failed to send result");
+            }
+            _ => panic!("expected AddLabels event"),
+        }
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::AddLabels {
+                issue_number,
+                labels,
+                result,
+            } => {
+                assert_eq!(issue_number, pr_number);
+                assert_eq!(labels, vec!["merge".to_string()]);
+                result.send(Ok(Vec::new())).expect("failed to send result");
+            }
+            _ => panic!("expected AddLabels event"),
+        }
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::RemoveLabel {
+                issue_number,
+                label,
+                result,
+            } => {
+                assert_eq!(issue_number, pr_number);
+                assert_eq!(label, "other_label");
+                result.send(Ok(Vec::new())).expect("failed to send result");
+            }
+            _ => panic!("expected RemoveLabel event"),
+        }
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::RemoveLabel {
+                issue_number,
+                label,
+                result,
+            } => {
+                assert_eq!(issue_number, pr_number);
+                assert_eq!(label, "some_label");
+                result
+                    .send(Err(anyhow::anyhow!("failed to remove label")))
+                    .expect("failed to send result");
+            }
+            _ => panic!("expected RemoveLabel event"),
+        }
+
+        let (mut conn, _) = task.await.unwrap();
+
+        let pr = Pr::find(RepositoryId(1), pr_number).get_result(&mut conn).await.unwrap();
+        assert_eq!(pr.added_labels, vec!["in_progress", "merge"]);
+    }
 }

@@ -1842,4 +1842,88 @@ mod tests {
 
         task.await.unwrap();
     }
+
+    #[tokio::test]
+    async fn test_repo_client_add_labels() {
+        let (octocrab, mut handle) = mock_octocrab();
+        let repo_client = mock_repo_client(
+            octocrab,
+            default_repo(),
+            GitHubBrawlRepoConfig::default(),
+            MockMergeWorkflow(1),
+        );
+
+        let task = tokio::spawn(async move {
+            repo_client.add_labels(1, &["queued".to_string()]).await.unwrap();
+            repo_client
+        });
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: POST,
+            uri: "/repositories/899726767/issues/1/labels",
+            headers: [
+                (
+                    "content-type",
+                    "application/json",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: Some(
+                Object {
+                    "labels": Array [
+                        String("queued"),
+                    ],
+                },
+            ),
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/add_labels.json")));
+
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_repo_client_remove_labels() {
+        let (octocrab, mut handle) = mock_octocrab();
+        let repo_client = mock_repo_client(
+            octocrab,
+            default_repo(),
+            GitHubBrawlRepoConfig::default(),
+            MockMergeWorkflow(1),
+        );
+
+        let task = tokio::spawn(async move {
+            repo_client.remove_label(1, "some_label").await.unwrap();
+            repo_client
+        });
+
+        let (req, resp) = handle.next_request().await.unwrap();
+        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+        DebugReq {
+            method: DELETE,
+            uri: "/repositories/899726767/issues/1/labels/some%5Flabel",
+            headers: [
+                (
+                    "content-length",
+                    "0",
+                ),
+                (
+                    "authorization",
+                    "REDACTED",
+                ),
+            ],
+            body: None,
+        }
+        "#);
+
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/remove_label.json")));
+
+        task.await.unwrap();
+    }
 }

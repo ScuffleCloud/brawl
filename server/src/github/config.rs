@@ -118,6 +118,7 @@ fn string_or_vec<'de, D: Deserializer<'de>>(s: D) -> Result<Vec<String>, D::Erro
     impl<'de> serde::de::Visitor<'de> for StringOrVecVisitor {
         type Value = Vec<String>;
 
+        #[cfg_attr(coverage_nightly, coverage(off))]
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
             formatter.write_str("a string or a vector of strings")
         }
