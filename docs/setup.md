@@ -83,7 +83,7 @@ You will be prompted to download a `.pem` file and you can save this to your mac
 
 ## 6. Configure the brawl server
 
-Brawl uses a `config.toml` file to configure the app, and you can find the full configuration reference [here](./configuration.md).
+Brawl uses a `config.toml` file to configure the app, and you can find the full configuration reference [**`here`**](./configuration.md).
 
 An example configuration file would look like this:
 
@@ -112,9 +112,9 @@ Alternatively, you can run a pre-compiled binary.
 
 In order to receive webhooks, you need to setup a reverse proxy.
 
-We recommend using [cloudflared](https://github.com/cloudflare/cloudflared) for this.
+We recommend using [**`cloudflared`**](https://github.com/cloudflare/cloudflared) for this.
 
-You can find the full setup instructions [here](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/).
+You can find the full setup instructions [**`here`**](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/).
 
 ## 9. Install the app on your account or organization
 
@@ -126,10 +126,10 @@ Once everything is setup you can install the app onto your account or organizati
 
 By default, regardless of which repositories the app is installed in, brawl will not run on any repos unless they have a `.github/brawl.toml` file present.
 
-Just having the file present is enough to enable brawl for that repo, however you can configure the behaviour of the bot refer to the [repository configuration reference](./repository-configuration.md) for more extensive configuration options. You can also look at this repository's [`.github/brawl.toml`](../.github/brawl.toml) file for an example. 
+Just having the file present is enough to enable brawl for that repo, however you can configure the behaviour of the bot refer to the [**`repository configuration reference`**](./repository-configuration.md) for more extensive configuration options. You can also look at this repository's [**`.github/brawl.toml`**](../.github/brawl.toml) file for an example. 
 
 This file is used to configure brawl for a given repo.
 
 ## 11. Success!
 
-You can now use brawl in your CI/CD pipeline, to see what commands are available go to the [commands reference](./commands.md).
+You can now use brawl in your CI/CD pipeline, to see what commands are available go to the [**`commands reference`**](./commands.md).
