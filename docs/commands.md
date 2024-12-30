@@ -20,6 +20,8 @@ The syntax is as follows:
 
 The `p` argument is optional and defaults to 5. Priority changes the order of the PR in the merge queue.
 
+Higher priority PRs will be merged first. PRs will be merged in the order of priority followed by oldest first.
+
 When merging brawl will create a new branch using the  [**`merge branch prefix`**](./repository-configuration.md#merge-branch-prefix) and the target branch name. It will create a new merge commit and push it to the target branch. Brawl will wait for all [**`required status checks`**](./repository-configuration.md#required-status-checks) to pass before pushing the merge commit to the target branch. 
 
 In order to use this command you must have one of the permissions in the [**`merge permissions`**](./repository-configuration.md#merge-permissions) section, by default this is `role:write`, which means you must have write access to the repository.
