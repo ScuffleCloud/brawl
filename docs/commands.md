@@ -20,9 +20,9 @@ The syntax is as follows:
 
 The `p` argument is optional and defaults to 5. Priority changes the order of the PR in the merge queue.
 
-When merging brawl will create a new branch using the  [**`merge branch prefix`**](./configuration.md#merge-branch-prefix) and the target branch name. It will create a new merge commit and push it to the target branch. Brawl will wait for all [**`required status checks`**](./configuration.md#required-status-checks) to pass before pushing the merge commit to the target branch. 
+When merging brawl will create a new branch using the  [**`merge branch prefix`**](./repository-configuration.md#merge-branch-prefix) and the target branch name. It will create a new merge commit and push it to the target branch. Brawl will wait for all [**`required status checks`**](./repository-configuration.md#required-status-checks) to pass before pushing the merge commit to the target branch. 
 
-In order to use this command you must have one of the permissions in the [**`merge permissions`**](./configuration.md#merge-permissions) section, by default this is `role:write`, which means you must have write access to the repository.
+In order to use this command you must have one of the permissions in the [**`merge permissions`**](./repository-configuration.md#merge-permissions) section, by default this is `role:write`, which means you must have write access to the repository.
 
 ## Cancel
 
@@ -38,9 +38,9 @@ If the PR is being merged it will cancel the merge. If the PR is being tried it 
 
 Depending on what is being cancelled, you will need to have the appropriate permissions.
 
-For merging that would be the [**`merge permissions`**](./configuration.md#merge-permissions) section. 
+For merging that would be the [**`merge permissions`**](./repository-configuration.md#merge-permissions) section. 
 
-For trying that would be the [**`try permissions`**](./configuration.md#try-permissions) section.
+For trying that would be the [**`try permissions`**](./repository-configuration.md#try-permissions) section.
 
 ## Try
 
@@ -67,9 +67,9 @@ The behavior around the commit and base is as follows:
 
 Trying is useful if you want to see if a PR merge will pass all the required status checks without actually merging it.
 
-In order to use this command you must have one of the permissions in the [**`try permissions`**](./configuration.md#try-permissions) section, by default this is the same as whatever the [**`merge permissions`**](./configuration.md#merge-permissions) section is set to.
+In order to use this command you must have one of the permissions in the [**`try permissions`**](./repository-configuration.md#try-permissions) section, by default this is the same as whatever the [**`merge permissions`**](./repository-configuration.md#merge-permissions) section is set to.
 
-Like a merge, the bot will wait for all [**`required status checks`**](./configuration.md#required-status-checks) to pass before reporting the result.
+Like a merge, the bot will wait for all [**`required status checks`**](./repository-configuration.md#required-status-checks) to pass before reporting the result.
 
 ## Retry
 
@@ -83,9 +83,9 @@ The syntax is as follows:
 
 This will retry the previous run.
 
-If the previous run was a merge it will retry the merge, and you will need one of the permissions in the [**`merge permissions`**](./configuration.md#merge-permissions) section.
+If the previous run was a merge it will retry the merge, and you will need one of the permissions in the [**`merge permissions`**](./repository-configuration.md#merge-permissions) section.
 
-If the previous run was a try it will retry the try, and you will need one of the permissions in the [**`try permissions`**](./configuration.md#try-permissions) section.
+If the previous run was a try it will retry the try, and you will need one of the permissions in the [**`try permissions`**](./repository-configuration.md#try-permissions) section.
 
 ## Ping
 
@@ -117,4 +117,4 @@ And to disable auto-try you can use the following command:
 
 Auto-try is useful if you want to try the PR on every push to the base branch. (similar to how GitHub Actions `push` works)
 
-You will need to have one of the permissions in the [**`try permissions`**](./configuration.md#try-permissions) section.
+You will need to have one of the permissions in the [**`try permissions`**](./repository-configuration.md#try-permissions) section.
