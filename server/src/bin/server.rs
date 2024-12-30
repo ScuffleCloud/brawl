@@ -30,7 +30,7 @@ pub struct Config {
     #[default = "info"]
     pub level: String,
     #[default(None)]
-    pub metrics_bind: Option<SocketAddr>,
+    pub telemetry_bind: Option<SocketAddr>,
     #[default(env_or_default("DATABASE_URL", None))]
     pub db_url: Option<String>,
     #[default(30)]
@@ -154,7 +154,7 @@ impl scuffle_bootstrap_telemetry::TelemetryConfig for Global {
     }
 
     fn bind_address(&self) -> Option<std::net::SocketAddr> {
-        self.config.metrics_bind
+        self.config.telemetry_bind
     }
 
     fn prometheus_metrics_registry(&self) -> Option<&Registry> {
