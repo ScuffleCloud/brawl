@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use anyhow::Context;
 use auto_try::AutoTryCommand;
 use diesel_async::AsyncPgConnection;
 use dry_run::DryRunCommand;
@@ -38,12 +39,12 @@ impl BrawlCommand {
         context: BrawlCommandContext<'_, R>,
     ) -> anyhow::Result<()> {
         match self {
-            BrawlCommand::DryRun(command) => dry_run::handle(conn, context, command).await,
-            BrawlCommand::Merge(command) => merge::handle(conn, context, command).await,
-            BrawlCommand::Retry => retry::handle(conn, context).await,
-            BrawlCommand::Cancel => cancel::handle(conn, context).await,
-            BrawlCommand::Ping => ping::handle(conn, context).await,
-            BrawlCommand::AutoTry(command) => auto_try::handle(conn, context, command).await,
+            BrawlCommand::DryRun(command) => dry_run::handle(conn, context, command).await.context("dry run"),
+            BrawlCommand::Merge(command) => merge::handle(conn, context, command).await.context("merge"),
+            BrawlCommand::Retry => retry::handle(conn, context).await.context("retry"),
+            BrawlCommand::Cancel => cancel::handle(conn, context).await.context("cancel"),
+            BrawlCommand::Ping => ping::handle(conn, context).await.context("ping"),
+            BrawlCommand::AutoTry(command) => auto_try::handle(conn, context, command).await.context("auto try"),
         }
     }
 }

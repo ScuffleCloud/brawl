@@ -453,10 +453,7 @@ mod tests {
                 Some(RepoClientRef::new(self.0.clone()))
             }
 
-            fn database(
-                &self,
-            ) -> impl std::future::Future<Output = anyhow::Result<impl DatabaseConnection + Send>> + Send
-            {
+            fn database(&self) -> impl std::future::Future<Output = anyhow::Result<impl DatabaseConnection + Send>> + Send {
                 fn get_conn() -> diesel_async::pooled_connection::bb8::PooledConnection<'static, AsyncPgConnection> {
                     unreachable!()
                 }

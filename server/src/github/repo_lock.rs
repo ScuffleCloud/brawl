@@ -39,7 +39,10 @@ impl LockGuardInner {
     }
 
     fn into_guard(self, permit: OwnedSemaphorePermit) -> LockGuard {
-        LockGuard { _inner: self, _permit: permit }
+        LockGuard {
+            _inner: self,
+            _permit: permit,
+        }
     }
 }
 

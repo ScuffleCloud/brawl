@@ -207,7 +207,11 @@ impl scuffle_brawl::auto_start::AutoStartConfig for Global {
 }
 
 impl scuffle_brawl::BrawlState for Global {
-    async fn get_repo(&self, installation_id: Option<InstallationId>, repo_id: RepositoryId) -> Option<impl GitHubRepoClient + 'static> {
+    async fn get_repo(
+        &self,
+        installation_id: Option<InstallationId>,
+        repo_id: RepositoryId,
+    ) -> Option<impl GitHubRepoClient + 'static> {
         let installation = if let Some(installation_id) = installation_id {
             self.github_service.get_client(installation_id)
         } else {

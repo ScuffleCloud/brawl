@@ -44,8 +44,6 @@ pub trait WebhookConfig: BrawlState {
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
 
     fn delete_installation(&self, installation_id: InstallationId) -> anyhow::Result<()>;
-
-    
 }
 
 fn router<C: WebhookConfig>(global: Arc<C>) -> axum::Router {
@@ -162,7 +160,8 @@ async fn handle_webhook_action(global: &impl WebhookConfig, action: WebhookEvent
                             .await
                     })
                 })
-                .await?;
+                .await
+                .context("command")?;
 
             Ok(())
         }
@@ -180,10 +179,9 @@ async fn handle_webhook_action(global: &impl WebhookConfig, action: WebhookEvent
                 .database()
                 .await?
                 .get()
-                .transaction(|conn| {
-                    Box::pin(async move { pull_request::handle(&repo_client, conn, pr_number, user).await })
-                })
-                .await?;
+                .transaction(|conn| Box::pin(async move { pull_request::handle(&repo_client, conn, pr_number, user).await }))
+                .await
+                .context("pull request")?;
 
             Ok(())
         }
@@ -200,33 +198,38 @@ async fn handle_webhook_action(global: &impl WebhookConfig, action: WebhookEvent
                 .database()
                 .await?
                 .get()
-                .transaction(|conn| {
-                    Box::pin(async move { check_event::handle(&repo_client, conn, check_run).await })
-                })
-                .await?;
+                .transaction(|conn| Box::pin(async move { check_event::handle(&repo_client, conn, check_run).await }))
+                .await
+                .context("check run")?;
 
             Ok(())
         }
         WebhookEventAction::DeleteInstallation { installation_id } => {
-            global.delete_installation(installation_id)?;
+            global.delete_installation(installation_id).context("delete installation")?;
             Ok(())
         }
         WebhookEventAction::AddRepository {
             installation_id,
             repo_id,
         } => {
-            global.add_repo(installation_id, repo_id).await?;
+            global.add_repo(installation_id, repo_id).await.context("add repository")?;
             Ok(())
         }
         WebhookEventAction::RemoveRepository {
             installation_id,
             repo_id,
         } => {
-            global.remove_repo(installation_id, repo_id).await?;
+            global
+                .remove_repo(installation_id, repo_id)
+                .await
+                .context("remove repository")?;
             Ok(())
         }
         WebhookEventAction::UpdateInstallation { installation } => {
-            global.update_installation(installation).await?;
+            global
+                .update_installation(installation)
+                .await
+                .context("update installation")?;
             Ok(())
         }
     }
