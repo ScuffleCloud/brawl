@@ -30,20 +30,6 @@ pub struct RepoClient<W = DefaultMergeWorkflow> {
 
 pub struct RepoClientRef<T, C>(T, PhantomData<C>);
 
-impl<T: Clone, C> Clone for RepoClientRef<T, C> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone(), PhantomData)
-    }
-}
-
-impl<T: Debug, C> Debug for RepoClientRef<T, C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "RepoClientRef({:?})", self.0)
-    }
-}
-
-impl<T: Copy, C> Copy for RepoClientRef<T, C> {}
-
 impl<T, C> RepoClientRef<T, C>
 where
     T: AsRef<C>,
@@ -52,6 +38,20 @@ where
     pub fn new(client: T) -> Self {
         Self(client, PhantomData)
     }
+}
+
+// Helper macro to forward all methods from the inner client
+macro_rules! forward_fns {
+    (
+        $(fn $fn:ident(&self $(,$arg:ident: $arg_ty:ty)*$(,)?) -> $ret:ty;)*
+    ) => {
+        $(
+            #[cfg_attr(all(test, coverage_nightly), coverage(off))]
+            fn $fn(&self $(,$arg: $arg_ty)*) -> $ret {
+                self.0.as_ref().$fn($($arg),*)
+            }
+        )*
+    };
 }
 
 impl<T, C> GitHubRepoClient for RepoClientRef<T, C>
@@ -65,146 +65,35 @@ where
         C: 'a,
         T: 'a;
 
-    fn id(&self) -> RepositoryId {
-        self.0.as_ref().id()
-    }
-
-    fn add_labels(
-        &self,
-        issue_number: u64,
-        labels: &[String],
-    ) -> impl std::future::Future<Output = anyhow::Result<Vec<Label>>> + Send {
-        self.0.as_ref().add_labels(issue_number, labels)
-    }
-
-    fn branch_workflows(&self, branch: &str) -> impl std::future::Future<Output = anyhow::Result<Vec<WorkflowRun>>> + Send {
-        self.0.as_ref().branch_workflows(branch)
-    }
-
-    fn can_merge(&self, user_id: UserId) -> impl std::future::Future<Output = anyhow::Result<bool>> + Send {
-        self.0.as_ref().can_merge(user_id)
-    }
-
-    fn can_try(&self, user_id: UserId) -> impl std::future::Future<Output = anyhow::Result<bool>> + Send {
-        self.0.as_ref().can_try(user_id)
-    }
-
-    fn can_review(&self, user_id: UserId) -> impl std::future::Future<Output = anyhow::Result<bool>> + Send {
-        self.0.as_ref().can_review(user_id)
-    }
-
-    fn config(&self) -> Arc<GitHubBrawlRepoConfig> {
-        self.0.as_ref().config()
-    }
-
-    fn owner(&self) -> String {
-        self.0.as_ref().owner()
-    }
-
-    fn name(&self) -> String {
-        self.0.as_ref().name()
-    }
-
-    fn merge_workflow(&self) -> Self::MergeWorkflow<'_> {
-        self.0.as_ref().merge_workflow()
-    }
-
-    fn cancel_workflow_run(&self, run_id: RunId) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
-        self.0.as_ref().cancel_workflow_run(run_id)
-    }
-
-    fn remove_label(
-        &self,
-        issue_number: u64,
-        labels: &str,
-    ) -> impl std::future::Future<Output = anyhow::Result<Vec<Label>>> + Send {
-        self.0.as_ref().remove_label(issue_number, labels)
-    }
-
-    fn has_permission(
-        &self,
-        user_id: UserId,
-        permissions: &[Permission],
-    ) -> impl std::future::Future<Output = anyhow::Result<bool>> + Send {
-        self.0.as_ref().has_permission(user_id, permissions)
-    }
-
-    fn get_user(&self, user_id: UserId) -> impl std::future::Future<Output = anyhow::Result<Option<User>>> + Send {
-        self.0.as_ref().get_user(user_id)
-    }
-
-    fn create_commit(
-        &self,
-        message: String,
-        parents: Vec<String>,
-        tree: String,
-    ) -> impl std::future::Future<Output = anyhow::Result<Commit>> + Send {
-        self.0.as_ref().create_commit(message, parents, tree)
-    }
-
-    fn get_ref_latest_commit(
-        &self,
-        gh_ref: &params::repos::Reference,
-    ) -> impl std::future::Future<Output = anyhow::Result<Option<Commit>>> + Send {
-        self.0.as_ref().get_ref_latest_commit(gh_ref)
-    }
-
-    fn push_branch(
-        &self,
-        branch: &str,
-        sha: &str,
-        force: bool,
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
-        self.0.as_ref().push_branch(branch, sha, force)
-    }
-
-    fn delete_branch(&self, branch: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
-        self.0.as_ref().delete_branch(branch)
-    }
-
-    fn get_pull_request(&self, number: u64) -> impl std::future::Future<Output = anyhow::Result<PullRequest>> + Send {
-        self.0.as_ref().get_pull_request(number)
-    }
-
-    fn get_role_members(&self, role: Role) -> impl std::future::Future<Output = anyhow::Result<Vec<UserId>>> + Send {
-        self.0.as_ref().get_role_members(role)
-    }
-
-    fn get_reviewers(&self, pr_number: u64) -> impl std::future::Future<Output = anyhow::Result<Vec<Review>>> + Send {
-        self.0.as_ref().get_reviewers(pr_number)
-    }
-
-    fn send_message(
-        &self,
-        issue_number: u64,
-        message: &IssueMessage,
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
-        self.0.as_ref().send_message(issue_number, message)
-    }
-
-    fn get_commit(&self, sha: &str) -> impl std::future::Future<Output = anyhow::Result<Option<Commit>>> + Send {
-        self.0.as_ref().get_commit(sha)
-    }
-
-    fn create_merge(
-        &self,
-        message: &CommitMessage,
-        base_sha: &str,
-        head_sha: &str,
-    ) -> impl std::future::Future<Output = anyhow::Result<MergeResult>> + Send {
-        self.0.as_ref().create_merge(message, base_sha, head_sha)
-    }
-
-    fn commit_link(&self, sha: &str) -> String {
-        self.0.as_ref().commit_link(sha)
-    }
-
-    fn workflow_run_link(&self, run_id: RunId) -> String {
-        self.0.as_ref().workflow_run_link(run_id)
-    }
-
-    fn pr_link(&self, pr_number: u64) -> String {
-        self.0.as_ref().pr_link(pr_number)
+    // Forward all methods from the inner client
+    forward_fns! {
+        fn id(&self) -> RepositoryId;
+        fn add_labels(&self, issue_number: u64, labels: &[String]) -> impl std::future::Future<Output = anyhow::Result<Vec<Label>>> + Send;
+        fn remove_label(&self, issue_number: u64, labels: &str) -> impl std::future::Future<Output = anyhow::Result<Vec<Label>>> + Send;
+        fn branch_workflows(&self, branch: &str) -> impl std::future::Future<Output = anyhow::Result<Vec<WorkflowRun>>> + Send;
+        fn can_merge(&self, user_id: UserId) -> impl std::future::Future<Output = anyhow::Result<bool>> + Send;
+        fn can_try(&self, user_id: UserId) -> impl std::future::Future<Output = anyhow::Result<bool>> + Send;
+        fn can_review(&self, user_id: UserId) -> impl std::future::Future<Output = anyhow::Result<bool>> + Send;
+        fn config(&self) -> Arc<GitHubBrawlRepoConfig>;
+        fn owner(&self) -> String;
+        fn name(&self) -> String;
+        fn merge_workflow(&self) -> Self::MergeWorkflow<'_>;
+        fn cancel_workflow_run(&self, run_id: RunId) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+        fn has_permission(&self, user_id: UserId, permissions: &[Permission]) -> impl std::future::Future<Output = anyhow::Result<bool>> + Send;
+        fn get_user(&self, user_id: UserId) -> impl std::future::Future<Output = anyhow::Result<Option<User>>> + Send;
+        fn create_commit(&self, message: String, parents: Vec<String>, tree: String) -> impl std::future::Future<Output = anyhow::Result<Commit>> + Send;
+        fn get_ref_latest_commit(&self, gh_ref: &params::repos::Reference) -> impl std::future::Future<Output = anyhow::Result<Option<Commit>>> + Send;
+        fn push_branch(&self, branch: &str, sha: &str, force: bool) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+        fn delete_branch(&self, branch: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+        fn get_pull_request(&self, number: u64) -> impl std::future::Future<Output = anyhow::Result<PullRequest>> + Send;
+        fn get_role_members(&self, role: Role) -> impl std::future::Future<Output = anyhow::Result<Vec<UserId>>> + Send;
+        fn get_reviewers(&self, pr_number: u64) -> impl std::future::Future<Output = anyhow::Result<Vec<Review>>> + Send;
+        fn send_message(&self, issue_number: u64, message: &IssueMessage) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+        fn get_commit(&self, sha: &str) -> impl std::future::Future<Output = anyhow::Result<Option<Commit>>> + Send;
+        fn create_merge(&self, message: &CommitMessage, base_sha: &str, head_sha: &str) -> impl std::future::Future<Output = anyhow::Result<MergeResult>> + Send;
+        fn commit_link(&self, sha: &str) -> String;
+        fn workflow_run_link(&self, run_id: RunId) -> String;
+        fn pr_link(&self, pr_number: u64) -> String;
     }
 }
 
