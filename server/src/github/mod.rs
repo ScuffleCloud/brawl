@@ -14,6 +14,7 @@ pub mod merge_workflow;
 pub mod messages;
 pub mod models;
 pub mod repo;
+pub mod repo_lock;
 
 pub struct GitHubService {
     client: Octocrab,
@@ -149,7 +150,7 @@ mod test_utils {
     use octocrab::{AuthState, Octocrab, OctocrabBuilder};
 
     use super::config::GitHubBrawlRepoConfig;
-    use super::installation::UserCache;
+    use super::installation::OrgState;
     use super::merge_workflow::GitHubMergeWorkflow;
     use super::models::{Repository, User};
     use super::repo::RepoClient;
@@ -227,13 +228,13 @@ mod test_utils {
         (client, handle)
     }
 
-    pub fn mock_repo_client(
+    pub async fn mock_repo_client(
         octocrab: Octocrab,
         repo: Repository,
         config: GitHubBrawlRepoConfig,
         merge_workflow: MockMergeWorkflow,
     ) -> RepoClient<MockMergeWorkflow> {
-        RepoClient::new(repo, config, octocrab, UserCache::default(), merge_workflow)
+        RepoClient::new(repo, config, octocrab, OrgState::default(), merge_workflow)
     }
 
     pub fn default_repo() -> Repository {

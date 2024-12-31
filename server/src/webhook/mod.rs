@@ -1,12 +1,11 @@
 use std::net::SocketAddr;
-use std::ops::DerefMut;
 use std::sync::Arc;
 
 use anyhow::Context;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::{Json, RequestExt};
-use diesel_async::{AsyncConnection, AsyncPgConnection};
+use diesel_async::AsyncConnection;
 use octocrab::models::{InstallationId, RepositoryId};
 use parse::{parse_from_request, WebhookEventAction};
 use scuffle_context::ContextFutExt;
@@ -18,19 +17,14 @@ mod parse;
 mod pull_request;
 
 use crate::command::BrawlCommandContext;
+use crate::database::DatabaseConnection;
 use crate::github::models::Installation;
-use crate::github::repo::GitHubRepoClient;
+use crate::BrawlState;
 
-pub trait WebhookConfig: Send + Sync + 'static {
+pub trait WebhookConfig: BrawlState {
     fn webhook_secret(&self) -> &str;
 
     fn bind_address(&self) -> Option<SocketAddr>;
-
-    fn get_repo(
-        &self,
-        installation_id: InstallationId,
-        repo_id: RepositoryId,
-    ) -> Option<Arc<impl GitHubRepoClient + 'static>>;
 
     fn add_repo(
         &self,
@@ -51,9 +45,7 @@ pub trait WebhookConfig: Send + Sync + 'static {
 
     fn delete_installation(&self, installation_id: InstallationId) -> anyhow::Result<()>;
 
-    fn database(
-        &self,
-    ) -> impl std::future::Future<Output = anyhow::Result<impl DerefMut<Target = AsyncPgConnection> + Send>> + Send;
+    
 }
 
 fn router<C: WebhookConfig>(global: Arc<C>) -> axum::Router {
@@ -148,20 +140,21 @@ async fn handle_webhook_action(global: &impl WebhookConfig, action: WebhookEvent
             repo_id,
             user,
         } => {
-            let Some(repo_client) = global.get_repo(installation_id, repo_id) else {
+            let Some(repo_client) = global.get_repo(Some(installation_id), repo_id).await else {
                 return Err(anyhow::anyhow!("repo client not found"));
             };
 
             global
                 .database()
                 .await?
+                .get()
                 .transaction(|conn| {
                     Box::pin(async move {
                         command
                             .handle(
                                 conn,
                                 BrawlCommandContext {
-                                    repo: repo_client.as_ref(),
+                                    repo: &repo_client,
                                     user,
                                     pr_number,
                                 },
@@ -179,15 +172,16 @@ async fn handle_webhook_action(global: &impl WebhookConfig, action: WebhookEvent
             pr_number,
             user,
         } => {
-            let Some(repo_client) = global.get_repo(installation_id, repo_id) else {
+            let Some(repo_client) = global.get_repo(Some(installation_id), repo_id).await else {
                 return Err(anyhow::anyhow!("repo client not found"));
             };
 
             global
                 .database()
                 .await?
+                .get()
                 .transaction(|conn| {
-                    Box::pin(async move { pull_request::handle(repo_client.as_ref(), conn, pr_number, user).await })
+                    Box::pin(async move { pull_request::handle(&repo_client, conn, pr_number, user).await })
                 })
                 .await?;
 
@@ -198,15 +192,16 @@ async fn handle_webhook_action(global: &impl WebhookConfig, action: WebhookEvent
             installation_id,
             repo_id,
         } => {
-            let Some(repo_client) = global.get_repo(installation_id, repo_id) else {
+            let Some(repo_client) = global.get_repo(Some(installation_id), repo_id).await else {
                 return Err(anyhow::anyhow!("repo client not found"));
             };
 
             global
                 .database()
                 .await?
+                .get()
                 .transaction(|conn| {
-                    Box::pin(async move { check_event::handle(repo_client.as_ref(), conn, check_run).await })
+                    Box::pin(async move { check_event::handle(&repo_client, conn, check_run).await })
                 })
                 .await?;
 

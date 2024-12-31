@@ -1,11 +1,11 @@
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
 use axum::http;
-use futures::TryStreamExt;
+use futures::{StreamExt, TryStreamExt};
 use moka::future::Cache;
 use octocrab::models::{InstallationRepositories, RepositoryId, UserId};
 use octocrab::{GitHubError, Octocrab};
@@ -14,13 +14,15 @@ use parking_lot::Mutex;
 use super::config::GitHubBrawlRepoConfig;
 use super::merge_workflow::DefaultMergeWorkflow;
 use super::models::{Installation, Repository, User};
-use super::repo::RepoClient;
+use super::repo::{GitHubRepoClient, RepoClient, RepoClientRef};
+use super::repo_lock::{LockGuard, RepoLock};
 
 pub struct InstallationClient {
     client: Octocrab,
     installation: Mutex<Installation>,
     repositories: Mutex<HashMap<RepositoryId, Arc<RepoClient>>>,
-    user_cache: UserCache,
+    state: OrgState,
+    repo_lock: RepoLock,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -36,19 +38,19 @@ pub enum GitHubBrawlRepoConfigError {
 }
 
 #[derive(Debug, Clone)]
-pub struct UserCache {
+pub struct OrgState {
     users: Cache<UserId, Option<User>>,
     users_by_name: Cache<String, Option<UserId>>,
     teams: Cache<(String, String), Vec<UserId>>,
 }
 
-impl Default for UserCache {
+impl Default for OrgState {
     fn default() -> Self {
         Self::new(Duration::from_secs(60), 100)
     }
 }
 
-impl UserCache {
+impl OrgState {
     pub fn new(ttl: Duration, capacity: u64) -> Self {
         Self {
             users: Cache::builder().max_capacity(capacity).time_to_live(ttl).build(),
@@ -58,13 +60,25 @@ impl UserCache {
     }
 }
 
+struct LockedRepoClient {
+    client: Arc<RepoClient>,
+    _guard: LockGuard,
+}
+
+impl AsRef<RepoClient> for LockedRepoClient {
+    fn as_ref(&self) -> &RepoClient {
+        &self.client
+    }
+}
+
 impl InstallationClient {
     pub fn new(client: Octocrab, installation: Installation) -> Self {
         Self {
             client,
             installation: Mutex::new(installation),
             repositories: Mutex::new(HashMap::new()),
-            user_cache: UserCache::default(),
+            state: OrgState::default(),
+            repo_lock: RepoLock::new(),
         }
     }
 
@@ -120,7 +134,7 @@ impl InstallationClient {
                     repo,
                     config,
                     self.client.clone(),
-                    self.user_cache.clone(),
+                    self.state.clone(),
                     DefaultMergeWorkflow,
                 )));
             }
@@ -129,8 +143,12 @@ impl InstallationClient {
     }
 
     pub async fn fetch_repositories(self: &Arc<Self>) -> anyhow::Result<()> {
-        let mut repositories = Vec::new();
         let mut page = 1;
+
+        let mut futures = futures::stream::FuturesUnordered::new();
+
+        let mut ids = HashSet::new();
+
         loop {
             let resp: InstallationRepositories = self
                 .client
@@ -138,31 +156,32 @@ impl InstallationClient {
                 .await
                 .context("get installation repositories")?;
 
-            repositories.extend(resp.repositories);
+            ids.extend(resp.repositories.iter().map(|repo| repo.id));
 
-            if repositories.len() >= resp.total_count as usize {
+            futures.extend(resp.repositories.into_iter().map(|repo| async move {
+                let repo: Repository = repo.into();
+                let r = self.set_repository(repo.clone()).await;
+                if let Err(e) = r {
+                    tracing::error!(
+                        id = %repo.id,
+                        name = %repo.name,
+                        owner = %repo.owner.login,
+                        "failed to set repository: {:#}",
+                        e
+                    );
+                }
+            }));
+
+            if futures.len() >= resp.total_count as usize {
                 break;
             }
 
             page += 1;
         }
 
-        let mut repos = HashMap::new();
-        for repo in repositories {
-            let config = self.get_repo_config(repo.id).await?;
-            repos.insert(
-                repo.id,
-                Arc::new(RepoClient::new(
-                    repo.into(),
-                    config,
-                    self.client.clone(),
-                    self.user_cache.clone(),
-                    DefaultMergeWorkflow,
-                )),
-            );
-        }
+        futures.collect::<Vec<_>>().await;
 
-        *self.repositories.lock() = repos;
+        self.repositories.lock().retain(|id, _| ids.contains(id));
 
         Ok(())
     }
@@ -175,8 +194,12 @@ impl InstallationClient {
         self.repositories.lock().contains_key(&repo_id)
     }
 
-    pub fn get_repo_client(&self, repo_id: RepositoryId) -> Option<Arc<RepoClient>> {
-        self.repositories.lock().get(&repo_id).cloned()
+    pub async fn get_repo_client(&self, repo_id: RepositoryId) -> Option<impl GitHubRepoClient + 'static> {
+        let client = self.repositories.lock().get(&repo_id).cloned()?;
+        Some(RepoClientRef::new(LockedRepoClient {
+            client,
+            _guard: self.repo_lock.lock(repo_id).await,
+        }))
     }
 
     pub async fn fetch_repository(self: &Arc<Self>, id: RepositoryId) -> anyhow::Result<()> {
@@ -198,12 +221,16 @@ impl InstallationClient {
     }
 
     pub fn update_installation(&self, installation: Installation) {
-        tracing::info!("updated installation: {} ({})", installation.account.login, installation.id);
+        tracing::info!(
+            id = %installation.id,
+            owner = %installation.account.login,
+            "updated installation",
+        );
         *self.installation.lock() = installation;
     }
 }
 
-impl UserCache {
+impl OrgState {
     pub async fn get_user(&self, client: &Octocrab, user_id: UserId) -> anyhow::Result<Option<User>> {
         self.users
             .try_get_with::<_, octocrab::Error>(user_id, async {
@@ -482,7 +509,7 @@ mod tests {
 
         let installation_client = task.await.unwrap();
         assert_eq!(installation_client.repositories(), vec![RepositoryId(1296269)]);
-        assert!(installation_client.get_repo_client(RepositoryId(1296269)).is_some());
+        assert!(installation_client.get_repo_client(RepositoryId(1296269)).await.is_some());
     }
 
     #[tokio::test]
@@ -539,7 +566,7 @@ mod tests {
 
         let installation_client = task.await.unwrap();
         assert!(installation_client.has_repository(RepositoryId(899726767)));
-        assert!(installation_client.get_repo_client(RepositoryId(899726767)).is_some());
+        assert!(installation_client.get_repo_client(RepositoryId(899726767)).await.is_some());
     }
 
     #[tokio::test]
@@ -603,7 +630,7 @@ mod tests {
     #[tokio::test]
     async fn test_user_cache() {
         let (client, mut handle) = mock_octocrab();
-        let cache = UserCache::new(std::time::Duration::from_millis(100), 100);
+        let cache = OrgState::new(std::time::Duration::from_millis(100), 100);
 
         let task = tokio::spawn(async move {
             cache.get_user(&client, UserId(49777269)).await.unwrap(); // cache miss

@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::ops::DerefMut;
-use std::sync::Arc;
 
 use anyhow::Context;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -9,20 +7,14 @@ use scuffle_context::ContextFutExt;
 
 use crate::database::ci_run::CiRun;
 use crate::database::pr::Pr;
+use crate::database::DatabaseConnection;
 use crate::github::merge_workflow::GitHubMergeWorkflow;
 use crate::github::repo::GitHubRepoClient;
+use crate::BrawlState;
 
 pub struct AutoStartSvc;
 
-pub trait AutoStartConfig: Send + Sync + 'static {
-    type RepoClient: GitHubRepoClient;
-
-    fn repo_client(&self, repo_id: RepositoryId) -> Option<Arc<Self::RepoClient>>;
-
-    fn database(
-        &self,
-    ) -> impl std::future::Future<Output = anyhow::Result<impl DerefMut<Target = AsyncPgConnection> + Send>> + Send;
-
+pub trait AutoStartConfig: BrawlState {
     fn interval(&self) -> std::time::Duration;
 }
 
@@ -36,8 +28,8 @@ impl<C: AutoStartConfig> scuffle_bootstrap::Service<C> for AutoStartSvc {
 
         while tokio::time::sleep(global.interval()).with_context(&ctx).await.is_some() {
             let mut conn = global.database().await?;
-            let runs = get_pending_runs(&mut conn).await?;
-            process_pending_runs(&mut conn, runs, global.as_ref()).await?;
+            let runs = get_pending_runs(conn.get()).await?;
+            process_pending_runs(conn.get(), runs, global.as_ref()).await?;
         }
 
         Ok(())
@@ -79,12 +71,12 @@ async fn process_pending_runs(
     global: &impl AutoStartConfig,
 ) -> anyhow::Result<()> {
     for run in runs {
-        let Some(repo_client) = global.repo_client(RepositoryId(run.github_repo_id as u64)) else {
+        let Some(repo_client) = global.get_repo(None, RepositoryId(run.github_repo_id as u64)).await else {
             tracing::error!("no installation client found for repo {}", run.github_repo_id);
             continue;
         };
 
-        if let Err(e) = handle_run(conn, &run, repo_client.as_ref()).await {
+        if let Err(e) = handle_run(conn, &run, &repo_client).await {
             tracing::error!(
                 "error handling run (repo id: {}, pr number: {}, run id: {}): {}",
                 run.github_repo_id,
@@ -128,15 +120,18 @@ async fn handle_run(
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::sync::Arc;
+
     use chrono::Utc;
-    use octocrab::models::UserId;
+    use octocrab::models::{InstallationId, UserId};
 
     use super::*;
     use crate::database::ci_run::Base;
     use crate::database::enums::GithubCiRunStatus;
-    use crate::database::get_test_connection;
+    use crate::database::{get_test_connection, DatabaseConnection};
     use crate::github::models::PullRequest;
     use crate::github::repo::test_utils::MockRepoClient;
+    use crate::github::repo::RepoClientRef;
 
     fn run() -> CiRun<'static> {
         CiRun {
@@ -453,16 +448,14 @@ mod tests {
 
         struct AutoStartCfg(Arc<MockRepoClient<MockWorkflow>>);
 
-        impl AutoStartConfig for AutoStartCfg {
-            type RepoClient = MockRepoClient<MockWorkflow>;
-
-            fn repo_client(&self, _: RepositoryId) -> Option<Arc<Self::RepoClient>> {
-                Some(self.0.clone())
+        impl BrawlState for AutoStartCfg {
+            async fn get_repo(&self, _: Option<InstallationId>, _: RepositoryId) -> Option<impl GitHubRepoClient + 'static> {
+                Some(RepoClientRef::new(self.0.clone()))
             }
 
             fn database(
                 &self,
-            ) -> impl std::future::Future<Output = anyhow::Result<impl DerefMut<Target = AsyncPgConnection> + Send>> + Send
+            ) -> impl std::future::Future<Output = anyhow::Result<impl DatabaseConnection + Send>> + Send
             {
                 fn get_conn() -> diesel_async::pooled_connection::bb8::PooledConnection<'static, AsyncPgConnection> {
                     unreachable!()
@@ -470,9 +463,11 @@ mod tests {
 
                 std::future::ready(Ok(get_conn()))
             }
+        }
 
+        impl AutoStartConfig for AutoStartCfg {
             fn interval(&self) -> std::time::Duration {
-                todo!()
+                unreachable!("this method should not be called")
             }
         }
 

@@ -22,6 +22,9 @@ macro_rules! test_query {
     };
 }
 
+use std::marker::PhantomData;
+
+use diesel_async::AsyncPgConnection;
 #[cfg(test)]
 use test_query;
 
@@ -50,4 +53,35 @@ pub async fn get_test_connection() -> diesel_async::AsyncPgConnection {
     conn.begin_test_transaction().await.expect("failed to begin test transaction");
 
     conn
+}
+
+pub trait DatabaseConnection {
+    fn get(&mut self) -> &mut AsyncPgConnection;
+}
+
+impl DatabaseConnection for AsyncPgConnection {
+    fn get(&mut self) -> &mut AsyncPgConnection {
+        self
+    }
+}
+
+impl DatabaseConnection for diesel_async::pooled_connection::bb8::PooledConnection<'_, AsyncPgConnection> {
+    fn get(&mut self) -> &mut AsyncPgConnection {
+        self
+    }
+}
+
+pub struct DatabaseConnectionRef<T, D> {
+    inner: T,
+    _db: PhantomData<D>,
+}
+
+impl<T, D> DatabaseConnection for DatabaseConnectionRef<T, D>
+where
+    T: AsMut<D>,
+    D: DatabaseConnection,
+{
+    fn get(&mut self) -> &mut AsyncPgConnection {
+        self.inner.as_mut().get()
+    }
 }
