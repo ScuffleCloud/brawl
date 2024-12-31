@@ -48,6 +48,8 @@ Inspired by [rustc-perf](https://github.com/rust-lang/rustc-perf), [bors](https:
 - [ ] Roll up PRs (roll up multiple PRs into a single PR)
 - [ ] Performance Benchmarks (upload, compare, dashboard)
 
+For more information, check out the [**docs**](./docs) folder.
+
 ## 🤝 Join the Scuffle Community
 
 We ❤️ contributions! Check out our [**CONTRIBUTING.md**](./CONTRIBUTING.md) for detailed guidelines on submitting improvements or bug fixes.
