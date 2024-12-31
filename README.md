@@ -48,16 +48,17 @@ Inspired by [rustc-perf](https://github.com/rust-lang/rustc-perf), [bors](https:
 - [ ] Roll up PRs (roll up multiple PRs into a single PR)
 - [ ] Performance Benchmarks (upload, compare, dashboard)
 
+For more information, check out the [**docs**](./docs) folder.
+
 ## 🤝 Join the Scuffle Community
 
 We ❤️ contributions! Check out our [**CONTRIBUTING.md**](./CONTRIBUTING.md) for detailed guidelines on submitting improvements or bug fixes.
 
 Join our [Discord](https://discord.gg/scuffle) to chat with the team and other contributors.
 
-### Sign the Contributor License Agreement (CLA)
+### Contributor License Agreement
 
-To contribute, please sign our [Contributor License Agreement](./CLA.md).
-It's quick and easy—[sign here](https://cla.scuffle.cloud) before submitting a pull request.
+This project does not require a Contributor License Agreement (CLA), all rights are maintained by the Contributor.
 
 ### Code of Conduct
 
