@@ -98,7 +98,7 @@ Your security is our priority. 🔒 Refer to our [**Security Policy**](./.github
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=scufflecloud/perf&type=Date)](https://star-history.com/#scufflecloud/perf&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=scufflecloud/brawl&type=Date)](https://star-history.com/#scufflecloud/brawl&Date)
 
 ---
 
