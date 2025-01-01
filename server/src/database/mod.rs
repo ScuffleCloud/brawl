@@ -71,6 +71,12 @@ impl DatabaseConnection for diesel_async::pooled_connection::bb8::PooledConnecti
     }
 }
 
+impl<T: DatabaseConnection> DatabaseConnection for &mut T {
+    fn get(&mut self) -> &mut AsyncPgConnection {
+        DatabaseConnection::get(*self)
+    }
+}
+
 pub struct DatabaseConnectionRef<T, D> {
     inner: T,
     _db: PhantomData<D>,

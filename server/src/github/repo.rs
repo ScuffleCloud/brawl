@@ -599,6 +599,7 @@ impl<W: GitHubMergeWorkflow> GitHubRepoClient for RepoClient<W> {
 pub mod test_utils {
     use super::*;
 
+    #[derive(Debug)]
     pub struct MockRepoClient<T: GitHubMergeWorkflow> {
         pub id: RepositoryId,
         pub owner: String,

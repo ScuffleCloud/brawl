@@ -194,7 +194,7 @@ impl scuffle_brawl::webhook::WebhookConfig for Global {
         Ok(())
     }
 
-    fn delete_installation(&self, installation_id: InstallationId) -> anyhow::Result<()> {
+    async fn delete_installation(&self, installation_id: InstallationId) -> anyhow::Result<()> {
         self.github_service.delete_installation(installation_id);
         Ok(())
     }
