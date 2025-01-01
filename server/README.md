@@ -1,13 +1,13 @@
-# scuffle-perf-server
+# scuffle-brawl
 
 > [!WARNING]  
 > This crate is under active development and may not be stable.
 
-[![crates.io](https://img.shields.io/crates/v/scuffle-perf-server.svg)](https://crates.io/crates/scuffle-perf-server) [![docs.rs](https://img.shields.io/docsrs/scuffle-perf-server)](https://docs.rs/scuffle-perf-server)
+[![crates.io](https://img.shields.io/crates/v/scuffle-brawl.svg)](https://crates.io/crates/scuffle-brawl) [![docs.rs](https://img.shields.io/docsrs/scuffle-brawl)](https://docs.rs/scuffle-brawl)
 
 ---
 
-A server designed to monitor continuous integration performance & benchmark results.
+A github bot for merging pull requests.
 
 ## Status
 
