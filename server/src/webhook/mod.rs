@@ -50,6 +50,7 @@ pub trait WebhookConfig: BrawlState {
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
 
     #[doc(hidden)]
+    #[cfg_attr(all(test, coverage_nightly), coverage(off))]
     fn handle_command<R: GitHubRepoClient + 'static>(
         &self,
         conn: &mut AsyncPgConnection,
@@ -60,6 +61,7 @@ pub trait WebhookConfig: BrawlState {
     }
 
     #[doc(hidden)]
+    #[cfg_attr(all(test, coverage_nightly), coverage(off))]
     fn handle_pull_request<R: GitHubRepoClient + 'static>(
         &self,
         conn: &mut AsyncPgConnection,
@@ -71,6 +73,7 @@ pub trait WebhookConfig: BrawlState {
     }
 
     #[doc(hidden)]
+    #[cfg_attr(all(test, coverage_nightly), coverage(off))]
     fn handle_check_run<R: GitHubRepoClient + 'static>(
         &self,
         conn: &mut AsyncPgConnection,
