@@ -6,7 +6,7 @@ on:
       - automation/brawl/try/*
       - automation/brawl/merge/*
 
-  workflow_dispatch:
+  pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -113,6 +113,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-24.04
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
     services:
       postgres:
         image: postgres
@@ -180,10 +181,51 @@ jobs:
           override_commit: ${{ env.RUN_COMMIT_SHA || github.sha }}
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  build:
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+
+    if: ${{ !cancelled() && github.event_name == 'push' }}
+
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: server/Dockerfile
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          push: ${{ startsWith(github.ref, 'refs/heads/automation/brawl/merge/') }}
+      
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: ${{ startsWith(github.ref, 'refs/heads/automation/brawl/merge/') }}
+
   brawl-done:
     runs-on: ubuntu-24.04
-    needs: [schema-check, hakari, test, clippy, fmt]
-    if: ${{ !cancelled() && (startsWith(github.ref, 'refs/heads/automation/brawl/merge/') || startsWith(github.ref, 'refs/heads/automation/brawl/try/')) }}
+    needs: [schema-check, hakari, test, clippy, fmt, build]
+    if: ${{ !cancelled() && github.event_name == 'push' }}
     steps:
       - name: calculate the correct exit status
         run: jq --exit-status 'all(.result == "success" or .result == "skipped")' <<< '${{ toJson(needs) }}'
