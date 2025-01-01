@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,7 +14,7 @@ use octocrab::params::{self};
 use octocrab::{GitHubError, Octocrab};
 
 use super::config::{GitHubBrawlRepoConfig, Permission, Role};
-use super::installation::UserCache;
+use super::installation::OrgState;
 use super::merge_workflow::{DefaultMergeWorkflow, GitHubMergeWorkflow};
 use super::messages::{CommitMessage, IssueMessage};
 use super::models::{Commit, Label, PullRequest, Repository, Review, User, WorkflowRun};
@@ -21,9 +23,78 @@ pub struct RepoClient<W = DefaultMergeWorkflow> {
     pub(super) repo: ArcSwap<Repository>,
     pub(super) config: ArcSwap<GitHubBrawlRepoConfig>,
     client: Octocrab,
-    user_cache: UserCache,
+    org_state: OrgState,
     merge_workflow: W,
     role_users: Cache<Role, Vec<UserId>>,
+}
+
+pub struct RepoClientRef<T, C>(T, PhantomData<C>);
+
+impl<T, C> RepoClientRef<T, C>
+where
+    T: AsRef<C>,
+    C: GitHubRepoClient,
+{
+    pub fn new(client: T) -> Self {
+        Self(client, PhantomData)
+    }
+}
+
+// Helper macro to forward all methods from the inner client
+macro_rules! forward_fns {
+    (
+        $(fn $fn:ident(&self $(,$arg:ident: $arg_ty:ty)*$(,)?) -> $ret:ty;)*
+    ) => {
+        $(
+            #[cfg_attr(all(test, coverage_nightly), coverage(off))]
+            fn $fn(&self $(,$arg: $arg_ty)*) -> $ret {
+                self.0.as_ref().$fn($($arg),*)
+            }
+        )*
+    };
+}
+
+impl<T, C> GitHubRepoClient for RepoClientRef<T, C>
+where
+    T: AsRef<C> + Send + Sync,
+    C: GitHubRepoClient,
+{
+    type MergeWorkflow<'a>
+        = C::MergeWorkflow<'a>
+    where
+        C: 'a,
+        T: 'a;
+
+    // Forward all methods from the inner client
+    forward_fns! {
+        fn id(&self) -> RepositoryId;
+        fn add_labels(&self, issue_number: u64, labels: &[String]) -> impl std::future::Future<Output = anyhow::Result<Vec<Label>>> + Send;
+        fn remove_label(&self, issue_number: u64, labels: &str) -> impl std::future::Future<Output = anyhow::Result<Vec<Label>>> + Send;
+        fn branch_workflows(&self, branch: &str) -> impl std::future::Future<Output = anyhow::Result<Vec<WorkflowRun>>> + Send;
+        fn can_merge(&self, user_id: UserId) -> impl std::future::Future<Output = anyhow::Result<bool>> + Send;
+        fn can_try(&self, user_id: UserId) -> impl std::future::Future<Output = anyhow::Result<bool>> + Send;
+        fn can_review(&self, user_id: UserId) -> impl std::future::Future<Output = anyhow::Result<bool>> + Send;
+        fn config(&self) -> Arc<GitHubBrawlRepoConfig>;
+        fn owner(&self) -> String;
+        fn name(&self) -> String;
+        fn merge_workflow(&self) -> Self::MergeWorkflow<'_>;
+        fn cancel_workflow_run(&self, run_id: RunId) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+        fn has_permission(&self, user_id: UserId, permissions: &[Permission]) -> impl std::future::Future<Output = anyhow::Result<bool>> + Send;
+        fn get_user(&self, user_id: UserId) -> impl std::future::Future<Output = anyhow::Result<Option<User>>> + Send;
+        fn create_commit(&self, message: String, parents: Vec<String>, tree: String) -> impl std::future::Future<Output = anyhow::Result<Commit>> + Send;
+        fn get_ref_latest_commit(&self, gh_ref: &params::repos::Reference) -> impl std::future::Future<Output = anyhow::Result<Option<Commit>>> + Send;
+        fn push_branch(&self, branch: &str, sha: &str, force: bool) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+        fn delete_branch(&self, branch: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+        fn get_pull_request(&self, number: u64) -> impl std::future::Future<Output = anyhow::Result<PullRequest>> + Send;
+        fn get_role_members(&self, role: Role) -> impl std::future::Future<Output = anyhow::Result<Vec<UserId>>> + Send;
+        fn get_reviewers(&self, pr_number: u64) -> impl std::future::Future<Output = anyhow::Result<Vec<Review>>> + Send;
+        fn send_message(&self, issue_number: u64, message: &IssueMessage) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+        fn get_commit(&self, sha: &str) -> impl std::future::Future<Output = anyhow::Result<Option<Commit>>> + Send;
+        fn create_merge(&self, message: &CommitMessage, base_sha: &str, head_sha: &str) -> impl std::future::Future<Output = anyhow::Result<MergeResult>> + Send;
+        fn commit_link(&self, sha: &str) -> String;
+        fn workflow_run_link(&self, run_id: RunId) -> String;
+        fn pr_link(&self, pr_number: u64) -> String;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,7 +259,7 @@ impl<W: GitHubMergeWorkflow> RepoClient<W> {
         repo: Repository,
         config: GitHubBrawlRepoConfig,
         client: Octocrab,
-        user_cache: UserCache,
+        user_cache: OrgState,
         merge_workflow: W,
     ) -> Self {
         tracing::info!(
@@ -202,7 +273,7 @@ impl<W: GitHubMergeWorkflow> RepoClient<W> {
             repo: ArcSwap::from_pointee(repo),
             config: ArcSwap::from_pointee(config),
             client,
-            user_cache,
+            org_state: user_cache,
             merge_workflow,
             role_users: Cache::builder()
                 .max_capacity(50)
@@ -239,7 +310,7 @@ impl<W: GitHubMergeWorkflow> GitHubRepoClient for RepoClient<W> {
     }
 
     async fn get_user(&self, user_id: UserId) -> anyhow::Result<Option<User>> {
-        self.user_cache.get_user(&self.client, user_id).await
+        self.org_state.get_user(&self.client, user_id).await
     }
 
     async fn get_pull_request(&self, number: u64) -> anyhow::Result<PullRequest> {
@@ -458,13 +529,13 @@ impl<W: GitHubMergeWorkflow> GitHubRepoClient for RepoClient<W> {
                     }
                 }
                 Permission::Team(team) => {
-                    let users = self.user_cache.get_team_users(&self.client, &owner, team).await?;
+                    let users = self.org_state.get_team_users(&self.client, &owner, team).await?;
                     if users.contains(&user_id) {
                         return Ok(true);
                     }
                 }
                 Permission::User(user) => {
-                    if let Some(user) = self.user_cache.get_user_by_name(&self.client, user).await? {
+                    if let Some(user) = self.org_state.get_user_by_name(&self.client, user).await? {
                         if user.id == user_id {
                             return Ok(true);
                         }
@@ -528,6 +599,7 @@ impl<W: GitHubMergeWorkflow> GitHubRepoClient for RepoClient<W> {
 pub mod test_utils {
     use super::*;
 
+    #[derive(Debug)]
     pub struct MockRepoClient<T: GitHubMergeWorkflow> {
         pub id: RepositoryId,
         pub owner: String,
@@ -890,7 +962,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
 
         assert_eq!(repo_client.id(), RepositoryId(899726767));
         assert_eq!(repo_client.owner(), "ScuffleCloud");
@@ -907,7 +980,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
 
         let task = tokio::spawn(async move {
             let user = repo_client.get_user(UserId(49777269)).await.unwrap().unwrap();
@@ -955,7 +1029,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
 
         let task = tokio::spawn(async move {
             let pull_request = repo_client.get_pull_request(22).await.unwrap();
@@ -998,7 +1073,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
 
         let task = tokio::spawn(async move {
             let members = repo_client.get_role_members(Role::Admin).await.unwrap();
@@ -1146,7 +1222,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
 
         let task = tokio::spawn(async move {
             repo_client
@@ -1192,7 +1269,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
 
         let task = tokio::spawn(async move {
             repo_client
@@ -1234,7 +1312,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
 
         let task = tokio::spawn(async move {
             repo_client
@@ -1292,7 +1371,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
 
         let task = tokio::spawn(async move {
             repo_client.delete_branch("feature/1").await.unwrap();
@@ -1356,7 +1436,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
 
         let task = tokio::spawn(async move {
             repo_client
@@ -1451,7 +1532,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
 
         let task = tokio::spawn(async move {
             assert!(repo_client
@@ -1614,7 +1696,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
 
         let task = tokio::spawn(async move {
             repo_client.get_reviewers(22).await.unwrap();
@@ -1653,7 +1736,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
 
         let task = tokio::spawn(async move {
             repo_client
@@ -1766,7 +1850,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
 
         let task = tokio::spawn(async move {
             assert!(matches!(
@@ -1927,7 +2012,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
 
         let task = tokio::spawn(async move {
             repo_client.add_labels(1, &["queued".to_string()]).await.unwrap();
@@ -1972,7 +2058,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
 
         let task = tokio::spawn(async move {
             repo_client.remove_label(1, "some_label").await.unwrap();
@@ -2011,7 +2098,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
         assert_eq!(
             repo.workflow_run_link(RunId(1)),
             "https://github.com/ScuffleCloud/ci-testing/actions/runs/1"
@@ -2026,7 +2114,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
         assert_eq!(repo.pr_link(1), "https://github.com/ScuffleCloud/ci-testing/pull/1");
     }
 
@@ -2038,7 +2127,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
         assert_eq!(repo.owner(), "ScuffleCloud");
     }
 
@@ -2050,7 +2140,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
         assert_eq!(repo.name(), "ci-testing");
     }
 
@@ -2062,7 +2153,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
         assert_eq!(
             repo.commit_link("b7f8cd1bd474d5be1802377c9a0baea5eb59fcb6"),
             "https://github.com/ScuffleCloud/ci-testing/commit/b7f8cd1bd474d5be1802377c9a0baea5eb59fcb6"
@@ -2078,7 +2170,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
         let task = tokio::spawn(async move {
             repo.branch_workflows("main").await.unwrap();
         });
@@ -2114,7 +2207,8 @@ mod tests {
             default_repo(),
             GitHubBrawlRepoConfig::default(),
             MockMergeWorkflow(1),
-        );
+        )
+        .await;
         let task = tokio::spawn(async move {
             repo.cancel_workflow_run(RunId(1)).await.unwrap();
         });

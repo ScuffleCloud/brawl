@@ -2,7 +2,6 @@
 #![cfg_attr(all(coverage_nightly, test), coverage(off))]
 
 use std::net::SocketAddr;
-use std::ops::DerefMut;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -16,8 +15,9 @@ use scuffle_bootstrap_telemetry::opentelemetry_sdk::metrics::SdkMeterProvider;
 use scuffle_bootstrap_telemetry::opentelemetry_sdk::Resource;
 use scuffle_bootstrap_telemetry::prometheus_client::registry::Registry;
 use scuffle_brawl::database::schema::health_check;
+use scuffle_brawl::database::DatabaseConnection;
 use scuffle_brawl::github::models::Installation;
-use scuffle_brawl::github::repo::{GitHubRepoClient, RepoClient};
+use scuffle_brawl::github::repo::GitHubRepoClient;
 use scuffle_brawl::github::GitHubService;
 use scuffle_metrics::opentelemetry::KeyValue;
 use tracing_subscriber::layer::SubscriberExt;
@@ -171,14 +171,6 @@ impl scuffle_brawl::webhook::WebhookConfig for Global {
         Some(self.config.github.webhook_bind)
     }
 
-    fn get_repo(
-        &self,
-        installation_id: InstallationId,
-        repo_id: RepositoryId,
-    ) -> Option<Arc<impl GitHubRepoClient + 'static>> {
-        self.github_service.get_client(installation_id)?.get_repo_client(repo_id)
-    }
-
     async fn add_repo(&self, installation_id: InstallationId, repo_id: RepositoryId) -> anyhow::Result<()> {
         let client = self
             .github_service
@@ -202,33 +194,36 @@ impl scuffle_brawl::webhook::WebhookConfig for Global {
         Ok(())
     }
 
-    fn delete_installation(&self, installation_id: InstallationId) -> anyhow::Result<()> {
+    async fn delete_installation(&self, installation_id: InstallationId) -> anyhow::Result<()> {
         self.github_service.delete_installation(installation_id);
         Ok(())
-    }
-
-    async fn database(&self) -> anyhow::Result<impl DerefMut<Target = AsyncPgConnection> + Send> {
-        let conn = self.database.get().await.context("get database connection")?;
-        Ok(conn)
     }
 }
 
 impl scuffle_brawl::auto_start::AutoStartConfig for Global {
-    type RepoClient = RepoClient;
-
     fn interval(&self) -> std::time::Duration {
         std::time::Duration::from_secs(self.config.interval_seconds)
     }
+}
 
-    async fn database(&self) -> anyhow::Result<impl DerefMut<Target = AsyncPgConnection> + Send> {
-        let conn = self.database.get().await.context("get database connection")?;
-        Ok(conn)
+impl scuffle_brawl::BrawlState for Global {
+    async fn get_repo(
+        &self,
+        installation_id: Option<InstallationId>,
+        repo_id: RepositoryId,
+    ) -> Option<impl GitHubRepoClient + 'static> {
+        let installation = if let Some(installation_id) = installation_id {
+            self.github_service.get_client(installation_id)
+        } else {
+            self.github_service.get_client_by_repo(repo_id)
+        }?;
+
+        installation.get_repo_client(repo_id).await
     }
 
-    fn repo_client(&self, repo_id: octocrab::models::RepositoryId) -> Option<Arc<RepoClient>> {
-        let client = self.github_service.get_client_by_repo(repo_id)?;
-        let repo = client.get_repo_client(repo_id)?;
-        Some(repo)
+    async fn database(&self) -> anyhow::Result<impl DatabaseConnection + Send> {
+        let conn = self.database.get().await.context("get database connection")?;
+        Ok(conn)
     }
 }
 

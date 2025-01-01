@@ -180,6 +180,7 @@ impl<T: GitHubMergeWorkflow> GitHubMergeWorkflow for &T {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
 pub struct DefaultMergeWorkflow;
 
 impl DefaultMergeWorkflow {
@@ -244,7 +245,8 @@ impl DefaultMergeWorkflow {
             .context("update")?
             == 0
         {
-            anyhow::bail!("run already completed");
+            tracing::warn!("run already completed");
+            return Ok(());
         }
 
         let checks_message = format_fn(|f| {
