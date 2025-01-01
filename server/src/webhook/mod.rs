@@ -44,7 +44,10 @@ pub trait WebhookConfig: BrawlState {
         installation: Installation,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
 
-    fn delete_installation(&self, installation_id: InstallationId) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+    fn delete_installation(
+        &self,
+        installation_id: InstallationId,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
 
     #[doc(hidden)]
     fn handle_command<R: GitHubRepoClient + 'static>(
@@ -53,9 +56,7 @@ pub trait WebhookConfig: BrawlState {
         command: BrawlCommand,
         context: BrawlCommandContext<'_, R>,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
-        async move {
-            command.handle(conn, context).await
-        }
+        async move { command.handle(conn, context).await }
     }
 
     #[doc(hidden)]
@@ -66,9 +67,7 @@ pub trait WebhookConfig: BrawlState {
         pr_number: u64,
         user: User,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
-        async move {
-            pull_request::handle(client, conn, pr_number, user).await
-        }
+        async move { pull_request::handle(client, conn, pr_number, user).await }
     }
 
     #[doc(hidden)]
@@ -78,9 +77,7 @@ pub trait WebhookConfig: BrawlState {
         client: &R,
         check_run: serde_json::Value,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
-        async move {
-            check_event::handle(client, conn, check_run).await
-        }
+        async move { check_event::handle(client, conn, check_run).await }
     }
 }
 
@@ -186,11 +183,16 @@ async fn handle_webhook_action(global: &impl WebhookConfig, action: WebhookEvent
                 .get()
                 .transaction(|conn| {
                     Box::pin(async move {
-                        global.handle_command(conn, command, BrawlCommandContext {
-                            repo: &repo_client,
+                        global
+                            .handle_command(
+                                conn,
+                                command,
+                                BrawlCommandContext {
+                                    repo: &repo_client,
                                     user,
                                     pr_number,
-                            })
+                                },
+                            )
                             .await
                     })
                 })
@@ -213,7 +215,9 @@ async fn handle_webhook_action(global: &impl WebhookConfig, action: WebhookEvent
                 .database()
                 .await?
                 .get()
-                .transaction(|conn| Box::pin(async move { global.handle_pull_request(conn, &repo_client, pr_number, user).await }))
+                .transaction(|conn| {
+                    Box::pin(async move { global.handle_pull_request(conn, &repo_client, pr_number, user).await })
+                })
                 .await
                 .context("pull request")?;
 
@@ -239,7 +243,10 @@ async fn handle_webhook_action(global: &impl WebhookConfig, action: WebhookEvent
             Ok(())
         }
         WebhookEventAction::DeleteInstallation { installation_id } => {
-            global.delete_installation(installation_id).await.context("delete installation")?;
+            global
+                .delete_installation(installation_id)
+                .await
+                .context("delete installation")?;
             Ok(())
         }
         WebhookEventAction::AddRepository {
@@ -277,9 +284,11 @@ mod tests {
     use octocrab::models::UserId;
     use tokio::sync::{mpsc, oneshot};
 
-    use crate::{database::get_test_connection, github::{merge_workflow::DefaultMergeWorkflow, repo::{test_utils::MockRepoClient, RepoClientRef}}};
-
     use super::*;
+    use crate::database::get_test_connection;
+    use crate::github::merge_workflow::DefaultMergeWorkflow;
+    use crate::github::repo::test_utils::MockRepoClient;
+    use crate::github::repo::RepoClientRef;
 
     #[derive(Debug)]
     enum Action {
@@ -343,11 +352,14 @@ mod tests {
             repo_id: RepositoryId,
         ) -> Option<impl GitHubRepoClient + 'static> {
             let (tx, rx) = oneshot::channel();
-            self.tx.send(Action::GetRepo {
-                installation_id: _installation_id,
-                repo_id,
-                tx,
-            }).await.expect("send get repo action");
+            self.tx
+                .send(Action::GetRepo {
+                    installation_id: _installation_id,
+                    repo_id,
+                    tx,
+                })
+                .await
+                .expect("send get repo action");
             let repo = rx.await.expect("get repo");
 
             repo.map(RepoClientRef::new)
@@ -355,31 +367,29 @@ mod tests {
     }
 
     impl WebhookConfig for MockWebhookConfig {
-        async fn add_repo(
-            &self,
-            _installation_id: InstallationId,
-            repo_id: RepositoryId,
-        ) -> anyhow::Result<()> {
+        async fn add_repo(&self, _installation_id: InstallationId, repo_id: RepositoryId) -> anyhow::Result<()> {
             let (tx, rx) = oneshot::channel();
-            self.tx.send(Action::AddRepository {
-                installation_id: _installation_id,
-                repo_id,
-                tx,
-            }).await.context("send add repository action")?;
+            self.tx
+                .send(Action::AddRepository {
+                    installation_id: _installation_id,
+                    repo_id,
+                    tx,
+                })
+                .await
+                .context("send add repository action")?;
             rx.await.context("add repository")?
         }
 
-        async fn remove_repo(
-            &self,
-            _installation_id: InstallationId,
-            repo_id: RepositoryId,
-        ) -> anyhow::Result<()> {
+        async fn remove_repo(&self, _installation_id: InstallationId, repo_id: RepositoryId) -> anyhow::Result<()> {
             let (tx, rx) = oneshot::channel();
-            self.tx.send(Action::RemoveRepository {
-                installation_id: _installation_id,
-                repo_id,
-                tx,
-            }).await.context("send remove repository action")?;
+            self.tx
+                .send(Action::RemoveRepository {
+                    installation_id: _installation_id,
+                    repo_id,
+                    tx,
+                })
+                .await
+                .context("send remove repository action")?;
             rx.await.context("remove repository")?
         }
 
@@ -390,10 +400,10 @@ mod tests {
             check_run: serde_json::Value,
         ) -> anyhow::Result<()> {
             let (tx, rx) = oneshot::channel();
-            self.tx.send(Action::CheckRun {
-                check_run,
-                tx,
-            }).await.context("send check run action")?;
+            self.tx
+                .send(Action::CheckRun { check_run, tx })
+                .await
+                .context("send check run action")?;
             rx.await.context("check run")?
         }
 
@@ -404,11 +414,14 @@ mod tests {
             context: BrawlCommandContext<'_, R>,
         ) -> anyhow::Result<()> {
             let (tx, rx) = oneshot::channel();
-            self.tx.send(Action::Command {
-                command,
-                pr_number: context.pr_number,
-                tx,
-            }).await.context("send command action")?;
+            self.tx
+                .send(Action::Command {
+                    command,
+                    pr_number: context.pr_number,
+                    tx,
+                })
+                .await
+                .context("send command action")?;
             rx.await.context("command")?
         }
 
@@ -420,31 +433,28 @@ mod tests {
             _user: User,
         ) -> anyhow::Result<()> {
             let (tx, rx) = oneshot::channel();
-            self.tx.send(Action::PullRequest {
-                pr_number,
-                tx,
-            }).await.context("send pull request action")?;
+            self.tx
+                .send(Action::PullRequest { pr_number, tx })
+                .await
+                .context("send pull request action")?;
             rx.await.context("pull request")?
         }
 
-        async fn update_installation(
-            &self,
-            installation: Installation,
-        ) -> anyhow::Result<()> {
+        async fn update_installation(&self, installation: Installation) -> anyhow::Result<()> {
             let (tx, rx) = oneshot::channel();
-            self.tx.send(Action::UpdateInstallation {
-                installation,
-                tx,
-            }).await.context("send update installation action")?;
+            self.tx
+                .send(Action::UpdateInstallation { installation, tx })
+                .await
+                .context("send update installation action")?;
             rx.await.context("update installation")?
         }
 
         async fn delete_installation(&self, installation_id: InstallationId) -> anyhow::Result<()> {
             let (tx, rx) = oneshot::channel();
-            self.tx.send(Action::DeleteInstallation {
-                installation_id,
-                tx,
-            }).await.context("send delete installation action")?;
+            self.tx
+                .send(Action::DeleteInstallation { installation_id, tx })
+                .await
+                .context("send delete installation action")?;
             rx.await.context("delete installation")?
         }
 
@@ -462,10 +472,15 @@ mod tests {
         let (config, mut rx) = MockWebhookConfig::new();
 
         let task = tokio::spawn(async move {
-            handle_webhook_action(&config, WebhookEventAction::AddRepository {
-                installation_id: InstallationId(1),
-                repo_id: RepositoryId(1),
-            }).await.expect("handle webhook action");
+            handle_webhook_action(
+                &config,
+                WebhookEventAction::AddRepository {
+                    installation_id: InstallationId(1),
+                    repo_id: RepositoryId(1),
+                },
+            )
+            .await
+            .expect("handle webhook action");
         });
 
         match rx.recv().await.expect("action") {
@@ -489,10 +504,15 @@ mod tests {
         let (config, mut rx) = MockWebhookConfig::new();
 
         let task = tokio::spawn(async move {
-            handle_webhook_action(&config, WebhookEventAction::RemoveRepository {
-                installation_id: InstallationId(1),
-                repo_id: RepositoryId(1),
-            }).await.expect("handle webhook action");
+            handle_webhook_action(
+                &config,
+                WebhookEventAction::RemoveRepository {
+                    installation_id: InstallationId(1),
+                    repo_id: RepositoryId(1),
+                },
+            )
+            .await
+            .expect("handle webhook action");
         });
 
         match rx.recv().await.expect("action") {
@@ -516,16 +536,18 @@ mod tests {
         let (config, mut rx) = MockWebhookConfig::new();
 
         let task = tokio::spawn(async move {
-            handle_webhook_action(&config, WebhookEventAction::DeleteInstallation {
-                installation_id: InstallationId(1),
-            }).await.expect("handle webhook action");
+            handle_webhook_action(
+                &config,
+                WebhookEventAction::DeleteInstallation {
+                    installation_id: InstallationId(1),
+                },
+            )
+            .await
+            .expect("handle webhook action");
         });
 
         match rx.recv().await.expect("action") {
-            Action::DeleteInstallation {
-                installation_id,
-                tx,
-            } => {
+            Action::DeleteInstallation { installation_id, tx } => {
                 assert_eq!(installation_id, InstallationId(1));
                 tx.send(Ok(())).expect("send result");
             }
@@ -540,22 +562,24 @@ mod tests {
         let (config, mut rx) = MockWebhookConfig::new();
 
         let task = tokio::spawn(async move {
-            handle_webhook_action(&config, WebhookEventAction::UpdateInstallation {
-                installation: Installation {
-                    id: InstallationId(1),
-                    account: User {
-                        id: UserId(1),
-                        login: "test".to_string(),
+            handle_webhook_action(
+                &config,
+                WebhookEventAction::UpdateInstallation {
+                    installation: Installation {
+                        id: InstallationId(1),
+                        account: User {
+                            id: UserId(1),
+                            login: "test".to_string(),
+                        },
                     },
                 },
-            }).await.expect("handle webhook action");
+            )
+            .await
+            .expect("handle webhook action");
         });
 
         match rx.recv().await.expect("action") {
-            Action::UpdateInstallation {
-                installation,
-                tx,
-            } => {
+            Action::UpdateInstallation { installation, tx } => {
                 assert_eq!(installation.id, InstallationId(1));
                 assert_eq!(installation.account.id, UserId(1));
                 assert_eq!(installation.account.login, "test");
@@ -572,11 +596,16 @@ mod tests {
         let (config, mut rx) = MockWebhookConfig::new();
 
         let task = tokio::spawn(async move {
-            handle_webhook_action(&config, WebhookEventAction::CheckRun {
-                check_run: serde_json::Value::default(),
-                installation_id: InstallationId(1),
-                repo_id: RepositoryId(1),
-            }).await.expect("handle webhook action");
+            handle_webhook_action(
+                &config,
+                WebhookEventAction::CheckRun {
+                    check_run: serde_json::Value::default(),
+                    installation_id: InstallationId(1),
+                    repo_id: RepositoryId(1),
+                },
+            )
+            .await
+            .expect("handle webhook action");
         });
 
         match rx.recv().await.expect("action") {
@@ -594,10 +623,7 @@ mod tests {
         }
 
         match rx.recv().await.expect("action") {
-            Action::CheckRun {
-                check_run,
-                tx,
-            } => {
+            Action::CheckRun { check_run, tx } => {
                 assert_eq!(check_run, serde_json::Value::default());
                 tx.send(Ok(())).expect("send result");
             }
@@ -612,15 +638,20 @@ mod tests {
         let (config, mut rx) = MockWebhookConfig::new();
 
         let task = tokio::spawn(async move {
-            handle_webhook_action(&config, WebhookEventAction::PullRequest {
-                installation_id: InstallationId(1),
-                repo_id: RepositoryId(1),
-                pr_number: 1,
-                user: User {
-                    id: UserId(1),
-                    login: "test".to_string(),
+            handle_webhook_action(
+                &config,
+                WebhookEventAction::PullRequest {
+                    installation_id: InstallationId(1),
+                    repo_id: RepositoryId(1),
+                    pr_number: 1,
+                    user: User {
+                        id: UserId(1),
+                        login: "test".to_string(),
+                    },
                 },
-            }).await.expect("handle webhook action");
+            )
+            .await
+            .expect("handle webhook action");
         });
 
         match rx.recv().await.expect("action") {
@@ -638,10 +669,7 @@ mod tests {
         }
 
         match rx.recv().await.expect("action") {
-            Action::PullRequest {
-                pr_number,
-                tx,
-            } => {
+            Action::PullRequest { pr_number, tx } => {
                 assert_eq!(pr_number, 1);
                 tx.send(Ok(())).expect("send result");
             }
@@ -656,16 +684,21 @@ mod tests {
         let (config, mut rx) = MockWebhookConfig::new();
 
         let task = tokio::spawn(async move {
-            handle_webhook_action(&config, WebhookEventAction::Command {
-                installation_id: InstallationId(1),
-                command: BrawlCommand::Cancel,
-                repo_id: RepositoryId(1),
-                pr_number: 1,
-                user: User {
-                    id: UserId(1),
-                    login: "test".to_string(),
+            handle_webhook_action(
+                &config,
+                WebhookEventAction::Command {
+                    installation_id: InstallationId(1),
+                    command: BrawlCommand::Cancel,
+                    repo_id: RepositoryId(1),
+                    pr_number: 1,
+                    user: User {
+                        id: UserId(1),
+                        login: "test".to_string(),
+                    },
                 },
-            }).await.expect("handle webhook action");
+            )
+            .await
+            .expect("handle webhook action");
         });
 
         match rx.recv().await.expect("action") {
@@ -683,11 +716,7 @@ mod tests {
         }
 
         match rx.recv().await.expect("action") {
-            Action::Command {
-                command,
-                pr_number,
-                tx,
-            } => {
+            Action::Command { command, pr_number, tx } => {
                 assert_eq!(command, BrawlCommand::Cancel);
                 assert_eq!(pr_number, 1);
                 tx.send(Ok(())).expect("send result");
