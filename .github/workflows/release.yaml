@@ -15,7 +15,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build:
+  push:
     runs-on: ubuntu-24.04
 
     permissions:
@@ -44,12 +44,18 @@ jobs:
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
   deploy:
-    needs: build
-    runs-on: ubuntu-24.04
+    if: ${{ github.ref_name == 'main' }}
+    runs-on: brawl-deploy
     steps:
-      - name: Tailscale
-        uses: tailscale/github-action@v3
-        with:
-          oauth-client-id: ${{ secrets.TAILSCALE_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TAILSCALE_CLIENT_SECRET }}
-          tags: tag:brawl-ci
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4.2.0
+
+      - name: Deploy
+        run: |
+          helm upgrade \
+            --install brawl \
+            --namespace brawl \
+            -f ./deploy/values.yaml \
+            --set image.tag=${{ github.sha }} \
+            ./helm
