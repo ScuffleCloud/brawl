@@ -71,6 +71,12 @@ impl Lock {
     }
 }
 
+impl Default for RepoLock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RepoLock {
     pub fn new() -> Self {
         Self {
