@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.config.configMapName }}
+data:
+  config.toml: |
+    {{ tpl .Values.config.template . | nindent 4 }}
