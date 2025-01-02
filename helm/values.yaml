@@ -111,7 +111,7 @@ httpRoute:
   annotations: {}
   hostnames:
     - "brawl.example.local"
-  rules: []
+  matches: []
 
 resources:
   {}

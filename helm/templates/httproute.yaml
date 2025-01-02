@@ -10,6 +10,9 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
+  backendRefs:
+    - name: {{ include "brawl.fullname" . }}
+      port: {{ .Values.service.port }}
   {{- with .Values.httpRoute.parentRefs }}
   parentRefs:
     {{- toYaml . | nindent 4 }}
@@ -17,8 +20,11 @@ spec:
   hostnames:
     {{- toYaml .Values.httpRoute.hostnames | nindent 4 }}
   rules:
-    {{- toYaml .Values.httpRoute.rules | nindent 4 }}
-  backendRefs:
-    - name: {{ include "brawl.fullname" . }}
-      port: {{ .Values.service.port }}
+    - backendRefs:
+        - name: {{ include "brawl.fullname" . }}
+          port: {{ .Values.service.port }}
+      {{ with .Values.httpRoute.matches }}
+      matches:
+        {{- toYaml . | nindent 4 }}
+      {{ end }}
 {{- end }}
