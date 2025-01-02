@@ -1,0 +1,11 @@
+httpRoute:
+  enabled: true
+  parentRefs:
+    - name: brawl-gateway
+      namespace: cloudflare-gateway
+  hostnames:
+    - "brawl.scuffle.cloud"
+
+envFrom:
+  - secretRef:
+      name: brawl-secrets

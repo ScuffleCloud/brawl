@@ -8,7 +8,7 @@ use anyhow::Context;
 use diesel::query_dsl::methods::FindDsl;
 use diesel::ExpressionMethods;
 use diesel_async::pooled_connection::bb8::{self};
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use octocrab::models::{InstallationId, RepositoryId};
 use scuffle_bootstrap_telemetry::opentelemetry;
 use scuffle_bootstrap_telemetry::opentelemetry_sdk::metrics::SdkMeterProvider;
@@ -94,6 +94,15 @@ impl scuffle_bootstrap::Global for Global {
             anyhow::bail!("DATABASE_URL is not set");
         };
 
+        tracing::info!("running migrations");
+
+        tokio::time::timeout(std::time::Duration::from_secs(10), run_migrations(db_url))
+            .await
+            .context("migrations timed out")?
+            .context("migrations failed")?;
+
+        tracing::info!("migrations complete");
+
         let database = diesel_async::pooled_connection::bb8::Pool::builder()
             .build(diesel_async::pooled_connection::AsyncDieselConnectionManager::new(db_url))
             .await
@@ -128,6 +137,17 @@ impl scuffle_bootstrap::Global for Global {
             github_service,
         }))
     }
+}
+
+async fn run_migrations(url: &str) -> anyhow::Result<()> {
+    let conn = diesel_async::pg::AsyncPgConnection::establish(url)
+        .await
+        .context("establish connection")?;
+
+    scuffle_brawl::migrations::run_migrations(conn)
+        .await
+        .context("run migrations")?;
+    Ok(())
 }
 
 impl scuffle_signal::SignalConfig for Global {
