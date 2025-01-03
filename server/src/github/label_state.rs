@@ -11,7 +11,7 @@ use crate::database::pr::Pr;
 fn desired_labels<'a>(
     status: GithubCiRunStatus,
     is_dry_run: bool,
-    pr: &Pr<'_>,
+    _pr: &Pr<'_>,
     config: &'a GitHubBrawlLabelsConfig,
 ) -> Vec<Cow<'a, str>> {
     let mut labels = Vec::new();
@@ -36,10 +36,6 @@ fn desired_labels<'a>(
             labels.extend(config.on_merge_success.iter().map(|s| Cow::Borrowed(s.as_ref())));
         }
         _ => {}
-    }
-
-    if pr.auto_try_requested_by_id.is_some() {
-        labels.extend(config.auto_try_enabled.iter().map(|s| Cow::Borrowed(s.as_ref())));
     }
 
     labels.sort();
@@ -159,7 +155,6 @@ mod tests {
             on_try_failure: vec!["try".to_string(), "failure".to_string()],
             on_merge_failure: vec!["merge".to_string(), "failure".to_string()],
             on_merge_success: vec!["merge".to_string(), "success".to_string()],
-            auto_try_enabled: vec!["auto-try".to_string()],
         };
 
         let cases: &[(GithubCiRunStatus, bool, &[&str])] = &[
@@ -174,17 +169,11 @@ mod tests {
         ];
 
         let pr = PullRequest::default();
-        let mut pr = Pr::new(&pr, UserId(1), RepositoryId(1));
+        let pr = Pr::new(&pr, UserId(1), RepositoryId(1));
 
         for (status, is_dry_run, expected) in cases {
             assert_eq!(desired_labels(*status, *is_dry_run, &pr, &config), *expected);
         }
-
-        pr.auto_try_requested_by_id = Some(1);
-        assert_eq!(
-            desired_labels(GithubCiRunStatus::Queued, false, &pr, &config),
-            &["auto-try", "queued"]
-        );
     }
 
     #[test]
@@ -199,7 +188,6 @@ mod tests {
             on_try_failure: vec!["try".to_string(), "failure".to_string()],
             on_merge_failure: vec!["merge".to_string(), "failure".to_string()],
             on_merge_success: vec!["merge".to_string(), "success".to_string()],
-            auto_try_enabled: vec!["auto-try".to_string()],
         };
 
         let LabelsAdjustments {
@@ -240,16 +228,6 @@ mod tests {
         assert_eq!(desired_labels, &["in_progress", "merge"]);
         assert_eq!(labels_to_add, &["in_progress"]);
         assert_eq!(labels_to_remove, &["queued"]);
-
-        pr.auto_try_requested_by_id = Some(1);
-        let LabelsAdjustments {
-            desired_labels,
-            labels_to_add,
-            labels_to_remove,
-        } = get_adjustments(&pr, GithubCiRunStatus::InProgress, false, &config);
-        assert_eq!(desired_labels, &["auto-try", "in_progress", "merge"]);
-        assert_eq!(labels_to_add, &["auto-try", "in_progress"]);
-        assert_eq!(labels_to_remove, &["queued"]);
     }
 
     #[tokio::test]
@@ -274,7 +252,6 @@ mod tests {
             on_try_failure: vec!["try".to_string(), "failure".to_string()],
             on_merge_failure: vec!["merge".to_string(), "failure".to_string()],
             on_merge_success: vec!["merge".to_string(), "success".to_string()],
-            auto_try_enabled: vec!["auto-try".to_string()],
         };
 
         let pr_number = pr.github_pr_number as u64;
@@ -414,7 +391,6 @@ mod tests {
             on_try_failure: vec!["try".to_string(), "failure".to_string()],
             on_merge_failure: vec!["merge".to_string(), "failure".to_string()],
             on_merge_success: vec!["merge".to_string(), "success".to_string()],
-            auto_try_enabled: vec!["auto-try".to_string()],
         };
 
         let pr_number = pr.github_pr_number as u64;

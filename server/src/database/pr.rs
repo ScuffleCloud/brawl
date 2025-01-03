@@ -33,7 +33,6 @@ pub struct Pr<'a> {
     pub added_labels: Vec<Cow<'a, str>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
-    pub auto_try_requested_by_id: Option<i64>,
 }
 
 #[derive(AsChangeset, Identifiable, Clone, bon::Builder)]
@@ -54,7 +53,6 @@ pub struct UpdatePr<'a> {
     pub merge_commit_sha: Option<Option<Cow<'a, str>>>,
     pub target_branch: Option<Cow<'a, str>>,
     pub latest_commit_sha: Option<Cow<'a, str>>,
-    pub auto_try_requested_by_id: Option<Option<i64>>,
     #[builder(default = chrono::Utc::now())]
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -93,7 +91,6 @@ impl<'a> UpdatePr<'a> {
         update_if_some!(pr.merge_commit_sha, self.merge_commit_sha);
         update_if_some!(pr.target_branch, self.target_branch);
         update_if_some!(pr.latest_commit_sha, self.latest_commit_sha);
-        update_if_some!(pr.auto_try_requested_by_id, self.auto_try_requested_by_id);
     }
 }
 
@@ -145,7 +142,6 @@ impl<'a> Pr<'a> {
             updated_at: chrono::Utc::now(),
             default_priority: None,
             added_labels: Vec::new(),
-            auto_try_requested_by_id: None,
         }
     }
 
@@ -179,7 +175,6 @@ impl<'a> Pr<'a> {
                 latest_commit_sha: Some(Cow::Borrowed(self.latest_commit_sha.as_ref())),
                 default_priority: None,
                 added_labels: None,
-                auto_try_requested_by_id: None,
                 updated_at: self.updated_at,
             })
             .returning(Pr::as_select())
@@ -274,8 +269,7 @@ mod tests {
       "github_pr"."latest_commit_sha",
       "github_pr"."added_labels",
       "github_pr"."created_at",
-      "github_pr"."updated_at",
-      "github_pr"."auto_try_requested_by_id"
+      "github_pr"."updated_at"
     FROM
       "github_pr"
     WHERE
@@ -305,7 +299,6 @@ mod tests {
             merge_status: GithubPrMergeStatus::NotReady,
             status: GithubPrStatus::Open,
             merge_commit_sha: None,
-            auto_try_requested_by_id: None,
         }),
         expected: @r#"
     INSERT INTO
@@ -325,8 +318,7 @@ mod tests {
         "latest_commit_sha",
         "added_labels",
         "created_at",
-        "updated_at",
-        "auto_try_requested_by_id"
+        "updated_at"
       )
     VALUES
       (
@@ -345,8 +337,7 @@ mod tests {
         $11,
         $12,
         $13,
-        $14,
-        DEFAULT
+        $14
       ) -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", [], 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z]
     "#,
     }
@@ -412,7 +403,6 @@ mod tests {
             merge_status: GithubPrMergeStatus::NotReady,
             status: GithubPrStatus::Open,
             merge_commit_sha: None,
-            auto_try_requested_by_id: None,
         }),
         expected: @r#"
     INSERT INTO
@@ -432,8 +422,7 @@ mod tests {
         "latest_commit_sha",
         "added_labels",
         "created_at",
-        "updated_at",
-        "auto_try_requested_by_id"
+        "updated_at"
       )
     VALUES
       (
@@ -452,8 +441,7 @@ mod tests {
         $11,
         $12,
         $13,
-        $14,
-        DEFAULT
+        $14
       ) ON CONFLICT ("github_repo_id", "github_pr_number") DO
     UPDATE
     SET
@@ -482,8 +470,7 @@ mod tests {
       "github_pr"."latest_commit_sha",
       "github_pr"."added_labels",
       "github_pr"."created_at",
-      "github_pr"."updated_at",
-      "github_pr"."auto_try_requested_by_id" -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", [], 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z, "test", "test", NotReady, [], Open, None, "test", "test", 2024-06-20T02:40:00Z]
+      "github_pr"."updated_at" -- binds: [1, 1, "test", "test", NotReady, 0, [], Open, "test", "test", "test", [], 2024-06-20T02:40:00Z, 2024-06-20T02:40:00Z, "test", "test", NotReady, [], Open, None, "test", "test", 2024-06-20T02:40:00Z]
     "#,
     }
 
@@ -574,7 +561,6 @@ mod tests {
             merge_commit_sha: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
-            auto_try_requested_by_id: None,
         }
         .insert()
         .execute(&mut conn)
@@ -606,7 +592,6 @@ mod tests {
             merge_commit_sha: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
-            auto_try_requested_by_id: None,
         }
         .insert()
         .execute(&mut conn)
@@ -646,7 +631,6 @@ mod tests {
             merge_commit_sha: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
-            auto_try_requested_by_id: None,
         }
         .insert()
         .execute(&mut conn)

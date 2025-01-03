@@ -1,7 +1,6 @@
 use std::str::FromStr;
 
 use anyhow::Context;
-use auto_try::AutoTryCommand;
 use diesel_async::AsyncPgConnection;
 use dry_run::DryRunCommand;
 use merge::MergeCommand;
@@ -9,7 +8,6 @@ use merge::MergeCommand;
 use crate::github::models::User;
 use crate::github::repo::GitHubRepoClient;
 
-mod auto_try;
 mod cancel;
 mod dry_run;
 mod merge;
@@ -23,7 +21,6 @@ pub enum BrawlCommand {
     Retry,
     Cancel,
     Ping,
-    AutoTry(AutoTryCommand),
 }
 
 pub struct BrawlCommandContext<'a, R> {
@@ -44,7 +41,6 @@ impl BrawlCommand {
             BrawlCommand::Retry => retry::handle(conn, context).await.context("retry"),
             BrawlCommand::Cancel => cancel::handle(conn, context).await.context("cancel"),
             BrawlCommand::Ping => ping::handle(conn, context).await.context("ping"),
-            BrawlCommand::AutoTry(command) => auto_try::handle(conn, context, command).await.context("auto try"),
         }
     }
 }
@@ -115,8 +111,6 @@ impl FromStr for BrawlCommand {
             }
             "retry" => Ok(BrawlCommand::Retry),
             "ping" => Ok(BrawlCommand::Ping),
-            "auto-try" => Ok(BrawlCommand::AutoTry(AutoTryCommand::Enable)),
-            "!auto-try" => Ok(BrawlCommand::AutoTry(AutoTryCommand::Disable)),
             command => {
                 tracing::debug!("invalid command: {}", command);
                 Err(BrawlCommandError::InvalidCommand(command.into()))
@@ -212,8 +206,6 @@ mod tests {
             ),
             ("<no command>", Err(BrawlCommandError::NoCommand)),
             ("@brawl @brawl merge", Err(BrawlCommandError::InvalidCommand("@brawl".into()))),
-            ("@brawl auto-try", Ok(BrawlCommand::AutoTry(AutoTryCommand::Enable))),
-            ("@brawl !auto-try", Ok(BrawlCommand::AutoTry(AutoTryCommand::Disable))),
         ];
 
         for (input, expected) in cases {
