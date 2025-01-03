@@ -23,7 +23,9 @@ async fn handle_with_pr<R: GitHubRepoClient>(
     pr: PullRequest,
     context: BrawlCommandContext<'_, R>,
 ) -> anyhow::Result<()> {
-    if !context.repo.config().enabled {
+    let config = context.repo.config().await?;
+
+    if !config.is_some_and(|c| c.enabled) {
         return Ok(());
     }
 

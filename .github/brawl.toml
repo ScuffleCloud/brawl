@@ -1,9 +1,5 @@
 enabled = true
 
-branches = [
-    "main",
-]
-
 merge_permissions = [
     "role:write",
 ]

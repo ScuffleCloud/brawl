@@ -31,8 +31,11 @@ pub async fn handle<R: GitHubRepoClient>(
         return Ok(());
     }
 
-    let required = repo
-        .config()
+    let Some(config) = repo.config().await? else {
+        return Ok(());
+    };
+
+    let required = config
         .required_status_checks
         .iter()
         .any(|check| check.eq_ignore_ascii_case(&check_run_event.name));

@@ -7,11 +7,12 @@ use anyhow::Context;
 use axum::http;
 use futures::{StreamExt, TryStreamExt};
 use moka::future::Cache;
+use octocrab::models::repos::Object;
 use octocrab::models::{InstallationRepositories, RepositoryId, UserId};
+use octocrab::params::repos::Reference;
 use octocrab::{GitHubError, Octocrab};
 use parking_lot::Mutex;
 
-use super::config::GitHubBrawlRepoConfig;
 use super::merge_workflow::DefaultMergeWorkflow;
 use super::models::{Installation, Repository, User};
 use super::repo::{GitHubRepoClient, RepoClient, RepoClientRef};
@@ -23,18 +24,6 @@ pub struct InstallationClient {
     repositories: Mutex<HashMap<RepositoryId, Arc<RepoClient>>>,
     state: OrgState,
     repo_lock: RepoLock,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum GitHubBrawlRepoConfigError {
-    #[error("expected 1 file, got {0}")]
-    ExpectedOneFile(usize),
-    #[error("github error: {0}")]
-    GitHub(#[from] octocrab::Error),
-    #[error("toml error: {0}")]
-    Toml(#[from] toml::de::Error),
-    #[error("missing content")]
-    MissingContent,
 }
 
 #[derive(Debug, Clone)]
@@ -82,60 +71,29 @@ impl InstallationClient {
         }
     }
 
-    async fn get_repo_config(&self, repo_id: RepositoryId) -> Result<GitHubBrawlRepoConfig, GitHubBrawlRepoConfigError> {
-        let file = match self
-            .client
-            .repos_by_id(repo_id)
-            .get_content()
-            .path(".github/brawl.toml")
-            .send()
-            .await
-        {
-            Ok(file) => file,
-            Err(octocrab::Error::GitHub {
-                source:
-                    GitHubError {
-                        status_code: http::StatusCode::NOT_FOUND,
-                        ..
-                    },
-                ..
-            }) => {
-                return Ok(GitHubBrawlRepoConfig::missing());
+    async fn set_repository(self: &Arc<Self>, repo: Repository) -> anyhow::Result<()> {
+        let base_commit_sha = if let Some(branch) = repo.default_branch.clone() {
+            match self.client.repos_by_id(repo.id).get_ref(&Reference::Branch(branch)).await?.object {
+                Object::Commit { sha, .. } => Some(sha),
+                Object::Tag { sha, .. } => Some(sha),
+                _ => anyhow::bail!("invalid object type for default branch"),
             }
-            Err(e) => return Err(e.into()),
+        } else {
+            None
         };
 
-        if file.items.is_empty() {
-            return Ok(GitHubBrawlRepoConfig::missing());
-        }
-
-        if file.items.len() != 1 {
-            return Err(GitHubBrawlRepoConfigError::ExpectedOneFile(file.items.len()));
-        }
-
-        let config = toml::from_str(
-            &file.items[0]
-                .decoded_content()
-                .ok_or(GitHubBrawlRepoConfigError::MissingContent)?,
-        )?;
-
-        Ok(config)
-    }
-
-    async fn set_repository(self: &Arc<Self>, repo: Repository) -> anyhow::Result<()> {
-        let config = self.get_repo_config(repo.id).await.context("get repo config")?;
         match self.repositories.lock().entry(repo.id) {
             Entry::Occupied(entry) => {
-                entry.get().config.store(Arc::new(config));
                 entry.get().repo.store(Arc::new(repo));
+                entry.get().base_commit_sha.store(base_commit_sha.map(Arc::new));
             }
             Entry::Vacant(entry) => {
                 entry.insert(Arc::new(RepoClient::new(
                     repo,
-                    config,
                     self.client.clone(),
                     self.state.clone(),
                     DefaultMergeWorkflow,
+                    base_commit_sha,
                 )));
             }
         }
@@ -338,64 +296,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_repo_config() {
-        let (client, mut handle) = mock_octocrab();
-        let installation_client = mock_installation_client(client);
-
-        let task = tokio::spawn(async move {
-            assert!(installation_client.get_repo_config(RepositoryId(1)).await.unwrap().enabled);
-            assert!(!installation_client.get_repo_config(RepositoryId(2)).await.unwrap().enabled);
-        });
-
-        let (req, resp) = handle.next_request().await.unwrap();
-        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
-        DebugReq {
-            method: GET,
-            uri: "/repositories/1/contents/.github/brawl.toml?",
-            headers: [
-                (
-                    "content-length",
-                    "0",
-                ),
-                (
-                    "authorization",
-                    "REDACTED",
-                ),
-            ],
-            body: None,
-        }
-        "#);
-
-        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_config.json")));
-
-        let (req, resp) = handle.next_request().await.unwrap();
-        insta::assert_debug_snapshot!(debug_req(req).await, @r#"
-        DebugReq {
-            method: GET,
-            uri: "/repositories/2/contents/.github/brawl.toml?",
-            headers: [
-                (
-                    "content-length",
-                    "0",
-                ),
-                (
-                    "authorization",
-                    "REDACTED",
-                ),
-            ],
-            body: None,
-        }
-        "#);
-
-        resp.send_response(mock_response(
-            StatusCode::NOT_FOUND,
-            include_bytes!("mock/get_config_not_found.json"),
-        ));
-
-        task.await.unwrap();
-    }
-
-    #[tokio::test]
     async fn test_set_repository() {
         let (client, mut handle) = mock_octocrab();
         let installation_client = mock_installation_client(client);
@@ -410,7 +310,7 @@ mod tests {
         insta::assert_debug_snapshot!(debug_req(req).await, @r#"
         DebugReq {
             method: GET,
-            uri: "/repositories/0/contents/.github/brawl.toml?",
+            uri: "/repositories/0/git/ref/heads/main",
             headers: [
                 (
                     "content-length",
@@ -425,13 +325,13 @@ mod tests {
         }
         "#);
 
-        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_config.json")));
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_ref.json")));
 
         let (req, resp) = handle.next_request().await.unwrap();
         insta::assert_debug_snapshot!(debug_req(req).await, @r#"
         DebugReq {
             method: GET,
-            uri: "/repositories/0/contents/.github/brawl.toml?",
+            uri: "/repositories/0/git/ref/heads/main",
             headers: [
                 (
                     "content-length",
@@ -446,7 +346,7 @@ mod tests {
         }
         "#);
 
-        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_config.json")));
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_ref.json")));
 
         let installation_client = task.await.unwrap();
         assert!(installation_client.has_repository(RepositoryId(0)));
@@ -490,7 +390,7 @@ mod tests {
         insta::assert_debug_snapshot!(debug_req(req).await, @r#"
         DebugReq {
             method: GET,
-            uri: "/repositories/1296269/contents/.github/brawl.toml?",
+            uri: "/repositories/1296269/git/ref/heads/master",
             headers: [
                 (
                     "content-length",
@@ -505,7 +405,7 @@ mod tests {
         }
         "#);
 
-        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_config.json")));
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_ref.json")));
 
         let installation_client = task.await.unwrap();
         assert_eq!(installation_client.repositories(), vec![RepositoryId(1296269)]);
@@ -547,7 +447,7 @@ mod tests {
         insta::assert_debug_snapshot!(debug_req(req).await, @r#"
         DebugReq {
             method: GET,
-            uri: "/repositories/899726767/contents/.github/brawl.toml?",
+            uri: "/repositories/899726767/git/ref/heads/test/queue",
             headers: [
                 (
                     "content-length",
@@ -562,7 +462,7 @@ mod tests {
         }
         "#);
 
-        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_config.json")));
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_ref.json")));
 
         let installation_client = task.await.unwrap();
         assert!(installation_client.has_repository(RepositoryId(899726767)));
@@ -603,7 +503,7 @@ mod tests {
         insta::assert_debug_snapshot!(debug_req(req).await, @r#"
         DebugReq {
             method: GET,
-            uri: "/repositories/0/contents/.github/brawl.toml?",
+            uri: "/repositories/0/git/ref/heads/main",
             headers: [
                 (
                     "content-length",
@@ -618,7 +518,7 @@ mod tests {
         }
         "#);
 
-        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_config.json")));
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_ref.json")));
 
         let installation_client = task.await.unwrap();
         assert!(installation_client.has_repository(RepositoryId(0)));
