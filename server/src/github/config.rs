@@ -108,9 +108,6 @@ pub struct GitHubBrawlLabelsConfig {
     /// The label to attach to PRs when they fail to try
     #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "string_or_vec")]
     pub on_try_failure: Vec<String>,
-    /// The label attached to PRs when auto-try is enabled
-    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "string_or_vec")]
-    pub auto_try_enabled: Vec<String>,
 }
 
 fn string_or_vec<'de, D: Deserializer<'de>>(s: D) -> Result<Vec<String>, D::Error> {

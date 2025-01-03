@@ -100,23 +100,3 @@ The syntax is as follows:
 ```
 
 This will send a ping to the brawl server and return a pong.
-
-## Auto-try
-
-The auto-try command is used to enable or disable auto-try.
-
-To enable auto-try you can use the following command:
-
-```
-?brawl auto-try
-```
-
-And to disable auto-try you can use the following command:
-
-```
-?brawl !auto-try
-```
-
-Auto-try is useful if you want to try the PR on every push to the base branch. (similar to how GitHub Actions `push` works)
-
-You will need to have one of the permissions in the [**`try permissions`**](./repository-configuration.md#try-permissions) section.
