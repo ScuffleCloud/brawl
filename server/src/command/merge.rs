@@ -73,8 +73,20 @@ async fn handle_with_pr<R: GitHubRepoClient>(
     let requested_reviewers: HashSet<i64> = HashSet::from_iter(pr.requested_reviewers.iter().map(|r| r.id.0 as i64));
 
     let reviewers = context.repo.get_reviewers(pr.number).await?;
+    let mut seen_reviewers = HashSet::new();
+    let mut deduped_reviewers = Vec::new();
+    for reviewer in reviewers.into_iter().rev() {
+        let Some(user) = &reviewer.user else {
+            continue;
+        };
+
+        if seen_reviewers.insert(user.id.0 as i64) {
+            deduped_reviewers.push(reviewer);
+        }
+    }
+
     let mut reviewer_ids = Vec::new();
-    for reviewer in reviewers {
+    for reviewer in deduped_reviewers.into_iter().rev() {
         let Some(user) = reviewer.user else {
             continue;
         };
@@ -87,6 +99,10 @@ async fn handle_with_pr<R: GitHubRepoClient>(
             reviewer_ids.push(user.id.0 as i64);
         }
     }
+
+    let mut reviewer_ids = Vec::from_iter(reviewer_ids);
+
+    reviewer_ids.sort_unstable();
 
     let db_pr = db_pr.upsert().get_result(conn).await?;
 
@@ -472,5 +488,128 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_merge_with_duplicates() {
+        let mut conn = get_test_connection().await;
+
+        let mock = MockMergeWorkFlow::default();
+
+        let (client, mut rx) = MockRepoClient::new(mock.clone());
+
+        let client = client.with_config(GitHubBrawlRepoConfig {
+            reviewer_permissions: Some(vec![Permission::Team("reviewers".to_string())]),
+            merge_permissions: vec![Permission::Team("mergers".to_string())],
+            ..Default::default()
+        });
+
+        let task = tokio::spawn(async move {
+            BrawlCommand::Merge(MergeCommand { priority: Some(100) })
+                .handle(
+                    &mut conn,
+                    BrawlCommandContext {
+                        repo: &client,
+                        pr_number: 1,
+                        user: User::default(),
+                    },
+                )
+                .await
+                .unwrap();
+
+            (conn, client)
+        });
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::GetPullRequest { number, result } => {
+                assert_eq!(number, 1);
+                result
+                    .send(Ok(PullRequest {
+                        number: 1,
+                        head: PrBranch {
+                            sha: "head_sha".to_string(),
+                            label: Some("head".to_string()),
+                            ref_field: "head".to_string(),
+                            repo: None,
+                            user: None,
+                        },
+                        base: PrBranch {
+                            sha: "base_sha".to_string(),
+                            label: Some("base".to_string()),
+                            ref_field: "base".to_string(),
+                            repo: None,
+                            user: None,
+                        },
+                        requested_reviewers: vec![],
+                        ..Default::default()
+                    }))
+                    .unwrap();
+            }
+            r => panic!("unexpected action: {:?}", r),
+        }
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::HasPermission {
+                user_id,
+                permissions,
+                result,
+            } => {
+                assert_eq!(user_id.0, 0);
+                assert_eq!(permissions, vec![Permission::Team("mergers".to_string())]);
+                result.send(Ok(true)).unwrap();
+            }
+            r => panic!("unexpected action: {:?}", r),
+        }
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::GetReviewers { pr_number, result } => {
+                assert_eq!(pr_number, 1);
+                result
+                    .send(Ok(vec![
+                        Review {
+                            state: Some(ReviewState::Approved),
+                            user: Some(User {
+                                id: UserId(1),
+                                login: "test".to_string(),
+                            }),
+                        },
+                        Review {
+                            state: Some(ReviewState::Approved),
+                            user: Some(User {
+                                id: UserId(1),
+                                login: "test1".to_string(),
+                            }),
+                        },
+                    ]))
+                    .unwrap();
+            }
+            r => panic!("unexpected action: {:?}", r),
+        }
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::HasPermission {
+                user_id,
+                permissions,
+                result,
+            } => {
+                assert_eq!(user_id.0, 1);
+                assert_eq!(permissions, vec![Permission::Team("reviewers".to_string())]);
+                result.send(Ok(true)).unwrap();
+            }
+            r => panic!("unexpected action: {:?}", r),
+        }
+
+        let (mut conn, client) = task.await.unwrap();
+
+        assert!(AtomicBool::load(&mock.queued, std::sync::atomic::Ordering::Acquire));
+
+        let run = CiRun::active(client.id(), 1).get_result(&mut conn).await.unwrap();
+        assert_eq!(run.requested_by_id, 0);
+        assert_eq!(run.approved_by_ids, vec![1]);
+        assert_eq!(run.ci_branch, "automation/brawl/merge/base");
+        assert_eq!(run.base_ref, Base::Branch("base".into()));
+        assert_eq!(run.head_commit_sha, "head_sha");
+        assert!(!run.is_dry_run);
+        assert_eq!(run.priority, 100);
     }
 }
