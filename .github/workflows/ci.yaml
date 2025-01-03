@@ -113,7 +113,6 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-24.04
-    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
     services:
       postgres:
         image: postgres

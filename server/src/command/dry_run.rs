@@ -42,6 +42,20 @@ async fn handle_with_pr<R: GitHubRepoClient>(
         return Ok(());
     }
 
+    if pr.merged_at.is_some() {
+        context
+            .repo
+            .send_message(
+                pr.number,
+                &messages::error(
+                    "PR is already merged",
+                    "Currently running runs on a PR that has been merged is not supported",
+                ),
+            )
+            .await?;
+        return Ok(());
+    }
+
     if let Some(base_sha) = &mut command.base_sha {
         let Some(base_commit) = context.repo.get_commit(base_sha).await.context("get base commit")? else {
             context
@@ -892,6 +906,76 @@ mod tests {
         )
         .await
         .unwrap();
+
+        let run = CiRun::active(client.id(), 1).get_result(&mut conn).await.optional().unwrap();
+
+        assert!(run.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_dry_run_pr_merged() {
+        let mut conn = crate::database::get_test_connection().await;
+
+        let (client, mut rx) = MockRepoClient::new(MockMergeWorkflow::default());
+
+        let pr = PullRequest {
+            number: 1,
+            merged_at: Some(Utc::now().into()),
+            ..Default::default()
+        };
+
+        let task = tokio::spawn(async move {
+            handle_with_pr(
+                &mut conn,
+                pr,
+                BrawlCommandContext {
+                    repo: &client,
+                    pr_number: 1,
+                    user: User {
+                        id: UserId(3),
+                        login: "test".to_string(),
+                    },
+                },
+                DryRunCommand {
+                    head_sha: None,
+                    base_sha: None,
+                },
+            )
+            .await
+            .unwrap();
+
+            (conn, client)
+        });
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::HasPermission { result, .. } => {
+                result.send(Ok(true)).unwrap();
+            }
+            _ => panic!("unexpected action"),
+        }
+
+        match rx.recv().await.unwrap() {
+            MockRepoAction::SendMessage {
+                issue_number,
+                message,
+                result,
+            } => {
+                assert_eq!(issue_number, 1);
+                insta::assert_snapshot!(message, @r"
+                🚨 PR is already merged
+                <details>
+                <summary>Error</summary>
+
+                Currently running runs on a PR that has been merged is not supported
+
+                </details>
+                ");
+                result.send(Ok(())).unwrap();
+            }
+            _ => panic!("unexpected action"),
+        }
+
+        let (mut conn, client) = task.await.unwrap();
 
         let run = CiRun::active(client.id(), 1).get_result(&mut conn).await.optional().unwrap();
 
