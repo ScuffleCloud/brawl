@@ -125,7 +125,10 @@ pub trait GitHubRepoClient: Send + Sync {
         }
     }
 
-    fn config_at_commit(&self, sha: &str) -> impl std::future::Future<Output = anyhow::Result<Option<Arc<GitHubBrawlRepoConfig>>>> + Send;
+    fn config_at_commit(
+        &self,
+        sha: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<Option<Arc<GitHubBrawlRepoConfig>>>> + Send;
 
     /// The base commit SHA
     fn base_commit_sha(&self) -> Option<Arc<String>>;
@@ -333,7 +336,6 @@ pub enum GitHubBrawlRepoConfigError {
     MissingContent,
 }
 
-
 impl<W: GitHubMergeWorkflow> GitHubRepoClient for RepoClient<W> {
     type MergeWorkflow<'a>
         = &'a W
@@ -349,46 +351,49 @@ impl<W: GitHubMergeWorkflow> GitHubRepoClient for RepoClient<W> {
     }
 
     async fn config_at_commit(&self, sha: &str) -> anyhow::Result<Option<Arc<GitHubBrawlRepoConfig>>> {
-        let config = self.configs.try_get_with_by_ref::<_, GitHubBrawlRepoConfigError, _>(sha, async {
-            let file = match self
-                .client
-                .repos_by_id(self.id())
-                .get_content()
-                .path(".github/brawl.toml")
-                .r#ref(sha)
-                .send()
-                .await
-            {
-                Ok(file) => file,
-                Err(octocrab::Error::GitHub {
-                    source:
-                        GitHubError {
-                            status_code: http::StatusCode::NOT_FOUND,
-                            ..
-                        },
-                    ..
-                }) => {
+        let config = self
+            .configs
+            .try_get_with_by_ref::<_, GitHubBrawlRepoConfigError, _>(sha, async {
+                let file = match self
+                    .client
+                    .repos_by_id(self.id())
+                    .get_content()
+                    .path(".github/brawl.toml")
+                    .r#ref(sha)
+                    .send()
+                    .await
+                {
+                    Ok(file) => file,
+                    Err(octocrab::Error::GitHub {
+                        source:
+                            GitHubError {
+                                status_code: http::StatusCode::NOT_FOUND,
+                                ..
+                            },
+                        ..
+                    }) => {
+                        return Ok(None);
+                    }
+                    Err(e) => return Err(e.into()),
+                };
+
+                if file.items.is_empty() {
                     return Ok(None);
                 }
-                Err(e) => return Err(e.into()),
-            };
-    
-            if file.items.is_empty() {
-                return Ok(None);
-            }
-    
-            if file.items.len() != 1 {
-                return Err(GitHubBrawlRepoConfigError::ExpectedOneFile(file.items.len()));
-            }
-    
-            let config = toml::from_str(
-                &file.items[0]
-                    .decoded_content()
-                    .ok_or(GitHubBrawlRepoConfigError::MissingContent)?,
-            )?;
-    
-            Ok(Some(Arc::new(config)))
-        }).await?;
+
+                if file.items.len() != 1 {
+                    return Err(GitHubBrawlRepoConfigError::ExpectedOneFile(file.items.len()));
+                }
+
+                let config = toml::from_str(
+                    &file.items[0]
+                        .decoded_content()
+                        .ok_or(GitHubBrawlRepoConfigError::MissingContent)?,
+                )?;
+
+                Ok(Some(Arc::new(config)))
+            })
+            .await?;
 
         Ok(config)
     }
@@ -444,7 +449,13 @@ impl<W: GitHubMergeWorkflow> GitHubRepoClient for RepoClient<W> {
         Ok(())
     }
 
-    async fn create_merge(&self, message: &CommitMessage, base_sha: &str, head_sha: &str, config: &GitHubBrawlRepoConfig) -> anyhow::Result<MergeResult> {
+    async fn create_merge(
+        &self,
+        message: &CommitMessage,
+        base_sha: &str,
+        head_sha: &str,
+        config: &GitHubBrawlRepoConfig,
+    ) -> anyhow::Result<MergeResult> {
         let tmp_branch = config.temp_branch();
 
         self.push_branch(&tmp_branch, base_sha, true)
@@ -728,11 +739,17 @@ pub mod test_utils {
         }
 
         pub fn with_config(self, config: impl Into<Option<GitHubBrawlRepoConfig>>) -> Self {
-            Self { config: config.into(), ..self }
+            Self {
+                config: config.into(),
+                ..self
+            }
         }
 
         pub fn with_base_commit_sha(self, base_commit_sha: impl Into<Option<String>>) -> Self {
-            Self { base_commit_sha: base_commit_sha.into(), ..self }
+            Self {
+                base_commit_sha: base_commit_sha.into(),
+                ..self
+            }
         }
 
         pub fn with_owner(self, owner: String) -> Self {
@@ -778,7 +795,7 @@ pub mod test_utils {
             message: CommitMessage,
             base_sha: String,
             head_sha: String,
-            config: GitHubBrawlRepoConfig,
+            config: Box<GitHubBrawlRepoConfig>,
             result: tokio::sync::oneshot::Sender<anyhow::Result<MergeResult>>,
         },
         CreateCommit {
@@ -942,7 +959,7 @@ pub mod test_utils {
                     message: message.clone(),
                     base_sha: base_sha.to_string(),
                     head_sha: head_sha.to_string(),
-                    config: config.clone(),
+                    config: Box::new(config.clone()),
                     result: tx,
                 })
                 .await
@@ -1065,7 +1082,10 @@ pub mod test_utils {
         async fn config_at_commit(&self, sha: &str) -> anyhow::Result<Option<Arc<GitHubBrawlRepoConfig>>> {
             let (tx, rx) = tokio::sync::oneshot::channel();
             self.actions
-                .send(MockRepoAction::GetConfigAtCommit { sha: sha.to_string(), result: tx })
+                .send(MockRepoAction::GetConfigAtCommit {
+                    sha: sha.to_string(),
+                    result: tx,
+                })
                 .await
                 .expect("send get config at commit");
             rx.await.expect("recv get config at commit")
@@ -1087,13 +1107,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_accessors() {
         let (octocrab, _) = mock_octocrab();
-        let repo_client = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo_client = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
 
         assert_eq!(repo_client.id(), RepositoryId(899726767));
         assert_eq!(repo_client.owner(), "ScuffleCloud");
@@ -1105,13 +1119,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_get_user() {
         let (octocrab, mut handle) = mock_octocrab();
-        let repo_client = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo_client = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
 
         let task = tokio::spawn(async move {
             let user = repo_client.get_user(UserId(49777269)).await.unwrap().unwrap();
@@ -1154,13 +1162,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_get_pull_request() {
         let (octocrab, mut handle) = mock_octocrab();
-        let repo_client = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo_client = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
 
         let task = tokio::spawn(async move {
             let pull_request = repo_client.get_pull_request(22).await.unwrap();
@@ -1198,13 +1200,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_get_role_members() {
         let (octocrab, mut handle) = mock_octocrab();
-        let repo_client = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo_client = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
 
         let task = tokio::spawn(async move {
             let members = repo_client.get_role_members(Role::Admin).await.unwrap();
@@ -1347,13 +1343,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_send_message() {
         let (octocrab, mut handle) = mock_octocrab();
-        let repo_client = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo_client = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
 
         let task = tokio::spawn(async move {
             repo_client
@@ -1394,13 +1384,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_get_commit() {
         let (octocrab, mut handle) = mock_octocrab();
-        let repo_client = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo_client = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
 
         let task = tokio::spawn(async move {
             repo_client
@@ -1437,13 +1421,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_create_commit() {
         let (octocrab, mut handle) = mock_octocrab();
-        let repo_client = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo_client = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
 
         let task = tokio::spawn(async move {
             repo_client
@@ -1496,13 +1474,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_delete_branch() {
         let (octocrab, mut handle) = mock_octocrab();
-        let repo_client = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo_client = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
 
         let task = tokio::spawn(async move {
             repo_client.delete_branch("feature/1").await.unwrap();
@@ -1561,13 +1533,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_get_ref_latest_commit() {
         let (octocrab, mut handle) = mock_octocrab();
-        let repo_client = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo_client = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
 
         let task = tokio::spawn(async move {
             repo_client
@@ -1657,13 +1623,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_has_permission() {
         let (octocrab, mut handle) = mock_octocrab();
-        let repo_client = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo_client = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
 
         let task = tokio::spawn(async move {
             assert!(repo_client
@@ -1821,13 +1781,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_get_reviewers() {
         let (octocrab, mut handle) = mock_octocrab();
-        let repo_client = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo_client = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
 
         let task = tokio::spawn(async move {
             repo_client.get_reviewers(22).await.unwrap();
@@ -1861,13 +1815,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_push_branch() {
         let (octocrab, mut handle) = mock_octocrab();
-        let repo_client = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo_client = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
 
         let task = tokio::spawn(async move {
             repo_client
@@ -1975,13 +1923,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_create_merge() {
         let (octocrab, mut handle) = mock_octocrab();
-        let repo_client = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo_client = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
 
         let task = tokio::spawn(async move {
             assert!(matches!(
@@ -2139,13 +2081,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_add_labels() {
         let (octocrab, mut handle) = mock_octocrab();
-        let repo_client = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo_client = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
 
         let task = tokio::spawn(async move {
             repo_client.add_labels(1, &["queued".to_string()]).await.unwrap();
@@ -2185,13 +2121,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_remove_labels() {
         let (octocrab, mut handle) = mock_octocrab();
-        let repo_client = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo_client = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
 
         let task = tokio::spawn(async move {
             repo_client.remove_label(1, "some_label").await.unwrap();
@@ -2225,13 +2155,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_workflow_run_link() {
         let octocrab = octocrab::Octocrab::builder().personal_token("token").build().unwrap();
-        let repo = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
         assert_eq!(
             repo.workflow_run_link(RunId(1)),
             "https://github.com/ScuffleCloud/ci-testing/actions/runs/1"
@@ -2241,52 +2165,28 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_pr_link() {
         let octocrab = octocrab::Octocrab::builder().personal_token("token").build().unwrap();
-        let repo = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
         assert_eq!(repo.pr_link(1), "https://github.com/ScuffleCloud/ci-testing/pull/1");
     }
 
     #[tokio::test]
     async fn test_repo_client_owner() {
         let octocrab = octocrab::Octocrab::builder().personal_token("token").build().unwrap();
-        let repo = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
         assert_eq!(repo.owner(), "ScuffleCloud");
     }
 
     #[tokio::test]
     async fn test_repo_client_name() {
         let octocrab = octocrab::Octocrab::builder().personal_token("token").build().unwrap();
-        let repo = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
         assert_eq!(repo.name(), "ci-testing");
     }
 
     #[tokio::test]
     async fn test_repo_client_commit_link() {
         let octocrab = octocrab::Octocrab::builder().personal_token("token").build().unwrap();
-        let repo = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
         assert_eq!(
             repo.commit_link("b7f8cd1bd474d5be1802377c9a0baea5eb59fcb6"),
             "https://github.com/ScuffleCloud/ci-testing/commit/b7f8cd1bd474d5be1802377c9a0baea5eb59fcb6"
@@ -2297,13 +2197,7 @@ mod tests {
     async fn test_repo_client_get_workflow_runs() {
         let (octocrab, mut handle) = mock_octocrab();
 
-        let repo = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
         let task = tokio::spawn(async move {
             repo.branch_workflows("main").await.unwrap();
         });
@@ -2334,13 +2228,7 @@ mod tests {
     #[tokio::test]
     async fn test_repo_client_cancel_workflow_run() {
         let (octocrab, mut handle) = mock_octocrab();
-        let repo = mock_repo_client(
-            octocrab,
-            default_repo(),
-            MockMergeWorkflow(1),
-            Some("base".to_owned()),
-        )
-        .await;
+        let repo = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
         let task = tokio::spawn(async move {
             repo.cancel_workflow_run(RunId(1)).await.unwrap();
         });
@@ -2376,7 +2264,7 @@ mod tests {
 
         let task = tokio::spawn(async move {
             let config = repo.config().await.unwrap().unwrap();
-            assert_eq!(config.enabled, true);
+            assert!(config.enabled);
         });
 
         let (req, resp) = handle.next_request().await.unwrap();
@@ -2409,8 +2297,12 @@ mod tests {
         let repo = mock_repo_client(octocrab, default_repo(), MockMergeWorkflow(1), Some("base".to_owned())).await;
 
         let task = tokio::spawn(async move {
-            let config = repo.config_at_commit("b7f8cd1bd474d5be1802377c9a0baea5eb59fcb6").await.unwrap().unwrap();
-            assert_eq!(config.enabled, true);
+            let config = repo
+                .config_at_commit("b7f8cd1bd474d5be1802377c9a0baea5eb59fcb6")
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(config.enabled);
         });
 
         let (req, resp) = handle.next_request().await.unwrap();

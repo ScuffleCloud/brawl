@@ -73,7 +73,13 @@ impl InstallationClient {
 
     async fn set_repository(self: &Arc<Self>, repo: Repository) -> anyhow::Result<()> {
         let base_commit_sha = if let Some(branch) = repo.default_branch.clone() {
-            match self.client.repos_by_id(repo.id).get_ref(&Reference::Branch(branch)).await?.object {
+            match self
+                .client
+                .repos_by_id(repo.id)
+                .get_ref(&Reference::Branch(branch))
+                .await?
+                .object
+            {
                 Object::Commit { sha, .. } => Some(sha),
                 Object::Tag { sha, .. } => Some(sha),
                 _ => anyhow::bail!("invalid object type for default branch"),

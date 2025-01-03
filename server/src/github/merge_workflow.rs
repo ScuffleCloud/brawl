@@ -512,7 +512,10 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
             }),
         );
 
-        let commit = match repo.create_merge(&commit_message, &base_sha, &run.head_commit_sha, &config).await {
+        let commit = match repo
+            .create_merge(&commit_message, &base_sha, &run.head_commit_sha, &config)
+            .await
+        {
             Ok(MergeResult::Success(commit)) => commit,
             Ok(MergeResult::Conflict) => {
                 self.fail(

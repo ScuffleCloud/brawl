@@ -924,7 +924,7 @@ mod tests {
 
         let pr = PullRequest {
             number: 1,
-            merged_at: Some(Utc::now().into()),
+            merged_at: Some(Utc::now()),
             ..Default::default()
         };
 
