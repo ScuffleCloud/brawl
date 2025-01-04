@@ -373,7 +373,9 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
         let mut success = true;
         let mut required_checks = Vec::new();
         let mut missing_checks = Vec::new();
-        let config = repo.config();
+        let Some(config) = repo.config().await? else {
+            return Ok(true);
+        };
 
         for check in &config.required_status_checks {
             let Some(check) = checks.get(check.as_str()).copied() else {
@@ -403,7 +405,7 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
         if success {
             self.success(run, repo, conn, pr, required_checks.as_ref()).await?;
         } else if chrono::Utc::now().signed_duration_since(started_at)
-            > chrono::Duration::minutes(repo.config().timeout_minutes as i64)
+            > chrono::Duration::minutes(config.timeout_minutes as i64)
         {
             self.fail(
                 run,
@@ -411,7 +413,7 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
                 repo,
                 conn,
                 &messages::tests_timeout(
-                    repo.config().timeout_minutes,
+                    config.timeout_minutes,
                     format_fn(|f| {
                         for (name, check) in &missing_checks {
                             if let Some(check) = check {
@@ -438,6 +440,10 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
         conn: &mut AsyncPgConnection,
         pr: &Pr<'_>,
     ) -> anyhow::Result<bool> {
+        let Some(config) = repo.config().await? else {
+            return Ok(false);
+        };
+
         let update = CiRun::update(run.id)
             .status(GithubCiRunStatus::InProgress)
             .started_at(chrono::Utc::now());
@@ -506,7 +512,10 @@ impl GitHubMergeWorkflow for DefaultMergeWorkflow {
             }),
         );
 
-        let commit = match repo.create_merge(&commit_message, &base_sha, &run.head_commit_sha).await {
+        let commit = match repo
+            .create_merge(&commit_message, &base_sha, &run.head_commit_sha, &config)
+            .await
+        {
             Ok(MergeResult::Success(commit)) => commit,
             Ok(MergeResult::Conflict) => {
                 self.fail(
@@ -892,7 +901,7 @@ mod tests {
         )
         .await;
 
-        client.config.labels = GitHubBrawlLabelsConfig {
+        client.config.as_mut().unwrap().labels = GitHubBrawlLabelsConfig {
             on_merge_queued: vec!["merge_queued".to_string()],
             on_merge_in_progress: vec!["merge_in_progress".to_string()],
             on_merge_success: vec!["merge_success".to_string()],
@@ -1332,7 +1341,7 @@ mod tests {
         )
         .await;
 
-        client.config.labels = GitHubBrawlLabelsConfig {
+        client.config.as_mut().unwrap().labels = GitHubBrawlLabelsConfig {
             on_merge_queued: vec!["merge_queued".to_string()],
             on_merge_in_progress: vec!["merge_in_progress".to_string()],
             on_merge_success: vec!["merge_success".to_string()],
@@ -1454,10 +1463,10 @@ mod tests {
         )
         .await;
 
-        let client = client.with_config(GitHubBrawlRepoConfig {
+        let client = client.with_config(Some(GitHubBrawlRepoConfig {
             timeout_minutes: 0,
             ..Default::default()
-        });
+        }));
 
         UpdateCiRun::builder(run.id)
             .status(GithubCiRunStatus::InProgress)
@@ -1546,7 +1555,7 @@ mod tests {
         )
         .await;
 
-        client.config.labels = GitHubBrawlLabelsConfig {
+        client.config.as_mut().unwrap().labels = GitHubBrawlLabelsConfig {
             on_merge_queued: vec!["merge_queued".to_string()],
             on_merge_in_progress: vec!["merge_in_progress".to_string()],
             on_merge_success: vec!["merge_success".to_string()],
@@ -1603,6 +1612,7 @@ mod tests {
                 message,
                 head_sha,
                 result,
+                ..
             } => {
                 assert_eq!(base_sha, "sha");
                 assert_eq!(head_sha, "head_commit_sha");
@@ -1758,6 +1768,7 @@ mod tests {
                 message,
                 head_sha,
                 result,
+                ..
             } => {
                 assert_eq!(base_sha, "branch_commit_sha");
                 assert_eq!(head_sha, "head_commit_sha");
@@ -2192,6 +2203,7 @@ mod tests {
                 message,
                 head_sha,
                 result,
+                ..
             } => {
                 assert_eq!(base_sha, "sha");
                 assert_eq!(head_sha, "head_commit_sha");
@@ -2286,7 +2298,7 @@ mod tests {
         )
         .await;
 
-        client.config.labels = GitHubBrawlLabelsConfig {
+        client.config.as_mut().unwrap().labels = GitHubBrawlLabelsConfig {
             on_merge_queued: vec!["merge_queued".to_string()],
             on_merge_in_progress: vec!["merge_in_progress".to_string()],
             on_merge_success: vec!["merge_success".to_string()],

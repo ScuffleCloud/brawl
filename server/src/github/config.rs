@@ -4,15 +4,13 @@ use std::str::FromStr;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Deserialize, Serialize, Clone, smart_default::SmartDefault)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct GitHubBrawlRepoConfig {
     /// Whether Brawl is enabled for this repo
     #[default(true)]
     pub enabled: bool,
     /// Labels to attach to PRs on different states
     pub labels: GitHubBrawlLabelsConfig,
-    /// The target branches that this queue matches against.
-    pub branches: Vec<String>,
     /// The branch prefix for @brawl try commands
     /// (default: "automation/brawl/try/")
     #[default("automation/brawl/try/")]
@@ -59,13 +57,6 @@ pub struct GitHubBrawlRepoConfig {
 }
 
 impl GitHubBrawlRepoConfig {
-    pub fn missing() -> Self {
-        Self {
-            enabled: false,
-            ..Default::default()
-        }
-    }
-
     pub fn try_permissions(&self) -> &[Permission] {
         self.try_permissions.as_ref().unwrap_or(&self.merge_permissions)
     }
@@ -88,7 +79,7 @@ impl GitHubBrawlRepoConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, smart_default::SmartDefault)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct GitHubBrawlLabelsConfig {
     /// The label to attach to PRs when they are in the merge queue
     #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "string_or_vec")]
@@ -315,18 +306,11 @@ mod tests {
     }
 
     #[test]
-    fn test_missing_disabled() {
-        let config = GitHubBrawlRepoConfig::missing();
-        assert!(!config.enabled);
-    }
-
-    #[test]
     fn test_default_config() {
         let config = GitHubBrawlRepoConfig::default();
         let s = toml::to_string_pretty(&config).unwrap();
         insta::assert_snapshot!(s, @r#"
         enabled = true
-        branches = []
         try_branch_prefix = "automation/brawl/try/"
         merge_branch_prefix = "automation/brawl/merge/"
         temp_branch_prefix = "automation/brawl/temp/"
@@ -343,10 +327,6 @@ mod tests {
     fn test_config_deserialize() {
         let config = r#"
         enabled = true
-        branches = [
-            "main",
-            "staging",
-        ]
         try_branch_prefix = "automation/brawl/try/"
         merge_branch_prefix = "automation/brawl/merge/"
         temp_branch_prefix = "automation/brawl/temp/"
@@ -366,7 +346,6 @@ mod tests {
 
         let config: GitHubBrawlRepoConfig = toml::from_str(config).unwrap();
         assert!(config.enabled);
-        assert_eq!(config.branches, vec!["main", "staging"]);
         assert_eq!(config.try_branch_prefix, "automation/brawl/try/");
         assert_eq!(config.merge_branch_prefix, "automation/brawl/merge/");
         assert_eq!(config.temp_branch_prefix, "automation/brawl/temp/");

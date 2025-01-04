@@ -33,7 +33,11 @@ async fn handle_with_pr<R: GitHubRepoClient>(
     context: BrawlCommandContext<'_, R>,
     mut command: DryRunCommand,
 ) -> anyhow::Result<()> {
-    if !context.repo.config().enabled {
+    let Some(config) = context.repo.config().await? else {
+        return Ok(());
+    };
+
+    if !config.enabled {
         return Ok(());
     }
 
@@ -92,7 +96,7 @@ async fn handle_with_pr<R: GitHubRepoClient>(
         .map(Base::from_sha)
         .unwrap_or_else(|| Base::from_pr(&pr));
 
-    let branch = context.repo.config().try_branch(pr.number);
+    let branch = config.try_branch(pr.number);
 
     let db_pr = Pr::new(&pr, context.user.id, context.repo.id())
         .upsert()
@@ -920,7 +924,7 @@ mod tests {
 
         let pr = PullRequest {
             number: 1,
-            merged_at: Some(Utc::now().into()),
+            merged_at: Some(Utc::now()),
             ..Default::default()
         };
 
