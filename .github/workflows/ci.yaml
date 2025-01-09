@@ -155,7 +155,10 @@ jobs:
       # Note; we don't run the powerset here because it's very slow on CI
       # Perhaps we should consider it at some point.
       - name: Run tests
-        run: cargo +${{ env.RUST_TOOLCHAIN }} llvm-cov nextest --no-fail-fast --all-features --lcov --output-path ./lcov.info --profile ci
+        run: |
+          cargo +${{ env.RUST_TOOLCHAIN }} llvm-cov nextest --no-fail-fast --all-features --profile ci --no-report
+          cargo +${{ env.RUST_TOOLCHAIN }} llvm-cov test --all-features --doc --no-report
+          cargo +${{ env.RUST_TOOLCHAIN }} llvm-cov report --lcov --output-path ./lcov.info
 
       - name: Codecov Override
         if: ${{ startsWith(github.ref, 'refs/heads/automation/brawl/try/') }}

@@ -2,14 +2,14 @@ name: Security audit
 on:
   push:
     branches-ignore:
-      - 'automation/**'
+      - "automation/**"
     paths:
-      - '.github/workflows/audit.yaml'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - 'deny.toml'
+      - ".github/workflows/audit.yaml"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "deny.toml"
   schedule:
-    - cron: '0 0 * * *'
+    - cron: "0 0 * * *"
 
 jobs:
   audit:
