@@ -2,37 +2,41 @@ mod? local
 
 set shell := ["/bin/bash", "-euo", "pipefail", "-uc"]
 
+# By default we use the nightly toolchain, however you can override this by setting the RUST_TOOLCHAIN environment variable.
+export RUST_TOOLCHAIN := env_var_or_default('RUST_TOOLCHAIN', 'nightly')
+
 # Runs cargo fmt
 fmt *args:
-    cargo +nightly fmt --all {{args}}
+    cargo +{{RUST_TOOLCHAIN}} fmt --all {{args}}
 
 # Runs cargo clippy
 lint *args:
-    cargo +nightly clippy --fix --allow-dirty --all-targets --all-features --allow-staged {{args}}
+    cargo +{{RUST_TOOLCHAIN}} clippy --fix --allow-dirty --all-targets --all-features --allow-staged {{args}}
 
 # Runs cargo test
 test *args:
     #!/bin/bash
     set -euo pipefail
 
-    # We use the nightly toolchain for coverage since it supports branch & no-coverage flags.
-
-    INSTA_FORCE_PASS=1 cargo +nightly llvm-cov clean --workspace
-    INSTA_FORCE_PASS=1 cargo +nightly llvm-cov nextest --no-report {{args}}
+    INSTA_FORCE_PASS=1 cargo +{{RUST_TOOLCHAIN}} llvm-cov clean --workspace
+    INSTA_FORCE_PASS=1 cargo +{{RUST_TOOLCHAIN}} llvm-cov nextest --include-build-script --no-report -- {{args}}
+    # Coverage for doctests is currently broken in llvm-cov.
+    # Once it fully works we can add the `--doctests` flag to the test and report command again.
+    cargo +{{RUST_TOOLCHAIN}} llvm-cov test --doc --no-report -- {{args}}
 
     # Do not generate the coverage report on CI
-    cargo +nightly insta review
-    cargo +nightly llvm-cov report --lcov --output-path ./lcov.info
-    cargo +nightly llvm-cov report --html
+    cargo insta review
+    cargo +{{RUST_TOOLCHAIN}} llvm-cov report --lcov --output-path ./lcov.info
+    cargo +{{RUST_TOOLCHAIN}} llvm-cov report --html
 
 # Runs cargo deny
 deny *args:
-    cargo deny {{args}} --all-features check
+    cargo +{{RUST_TOOLCHAIN}} deny {{args}} --all-features check
 
 # Update the workspace dependencies
 workspace-hack:
-    cargo hakari manage-deps
-    cargo hakari generate
+    cargo +{{RUST_TOOLCHAIN}} hakari manage-deps
+    cargo +{{RUST_TOOLCHAIN}} hakari generate
 
 schema_path := "server/src/database/schema.rs"
 
