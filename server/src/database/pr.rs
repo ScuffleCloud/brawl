@@ -103,15 +103,14 @@ fn pr_status(pr: &PullRequest) -> GithubPrStatus {
     }
 }
 
-fn pr_merge_status(pr: &PullRequest) -> GithubPrMergeStatus {
+fn pr_merge_status(pr: &PullRequest) -> Option<GithubPrMergeStatus> {
     match pr.mergeable_state {
-        _ if pr.merged_at.is_some() => GithubPrMergeStatus::Merged,
-        Some(MergeableState::Behind | MergeableState::Blocked | MergeableState::Clean) => GithubPrMergeStatus::Ready,
-        Some(MergeableState::Dirty) => GithubPrMergeStatus::Conflict,
-        Some(MergeableState::Unstable) => GithubPrMergeStatus::CheckFailure,
-        Some(MergeableState::Unknown) => GithubPrMergeStatus::NotReady,
-        Some(MergeableState::Draft) => GithubPrMergeStatus::NotReady,
-        _ => GithubPrMergeStatus::NotReady,
+        _ if pr.merged_at.is_some() => Some(GithubPrMergeStatus::Merged),
+        Some(MergeableState::Behind | MergeableState::Blocked | MergeableState::Clean) => Some(GithubPrMergeStatus::Ready),
+        Some(MergeableState::Dirty) => Some(GithubPrMergeStatus::Conflict),
+        Some(MergeableState::Unstable) => Some(GithubPrMergeStatus::CheckFailure),
+        Some(MergeableState::Draft) => Some(GithubPrMergeStatus::NotReady),
+        _ => None,
     }
 }
 
@@ -130,7 +129,7 @@ impl<'a> Pr<'a> {
             github_pr_number: pr.number as i32,
             title: Cow::Borrowed(&pr.title),
             body: Cow::Borrowed(&pr.body),
-            merge_status: pr_merge_status(pr),
+            merge_status: pr_merge_status(pr).unwrap_or(GithubPrMergeStatus::NotReady),
             author_id: pr.user.as_ref().map(|u| u.id.0 as i64).unwrap_or(user_id.0 as i64),
             assigned_ids: pr_assigned_ids(pr),
             status: pr_status(pr),
@@ -201,7 +200,9 @@ impl<'a> Pr<'a> {
         UpdatePr::builder(self.github_repo_id, self.github_pr_number)
             .maybe_title(self.title.ne(&title).then_some(title))
             .maybe_body(self.body.ne(&body).then_some(body))
-            .maybe_merge_status(self.merge_status.ne(&merge_status).then_some(merge_status))
+            .maybe_merge_status(
+                merge_status.and_then(|merge_status| self.merge_status.ne(&merge_status).then_some(merge_status)),
+            )
             .maybe_assigned_ids(self.assigned_ids.ne(&assigned_ids).then_some(assigned_ids))
             .maybe_status(self.status.ne(&status).then_some(status))
             .maybe_merge_commit_sha(self.merge_commit_sha.ne(&merge_commit_sha).then_some(merge_commit_sha))
@@ -669,13 +670,13 @@ mod tests {
     #[test]
     fn test_pr_merge_status_from_pr() {
         let cases = [
-            (MergeableState::Behind, GithubPrMergeStatus::Ready),
-            (MergeableState::Blocked, GithubPrMergeStatus::Ready),
-            (MergeableState::Clean, GithubPrMergeStatus::Ready),
-            (MergeableState::Dirty, GithubPrMergeStatus::Conflict),
-            (MergeableState::Unstable, GithubPrMergeStatus::CheckFailure),
-            (MergeableState::Unknown, GithubPrMergeStatus::NotReady),
-            (MergeableState::Draft, GithubPrMergeStatus::NotReady),
+            (MergeableState::Behind, Some(GithubPrMergeStatus::Ready)),
+            (MergeableState::Blocked, Some(GithubPrMergeStatus::Ready)),
+            (MergeableState::Clean, Some(GithubPrMergeStatus::Ready)),
+            (MergeableState::Dirty, Some(GithubPrMergeStatus::Conflict)),
+            (MergeableState::Unstable, Some(GithubPrMergeStatus::CheckFailure)),
+            (MergeableState::Draft, Some(GithubPrMergeStatus::NotReady)),
+            (MergeableState::Unknown, None),
         ];
 
         for (state, status) in cases {
@@ -693,7 +694,7 @@ mod tests {
                 merged_at: Some(chrono::Utc::now()),
                 ..Default::default()
             }),
-            GithubPrMergeStatus::Merged
+            Some(GithubPrMergeStatus::Merged)
         );
     }
 
