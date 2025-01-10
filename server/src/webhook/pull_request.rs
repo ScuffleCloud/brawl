@@ -81,6 +81,7 @@ mod tests {
     use std::sync::Arc;
 
     use chrono::Utc;
+    use octocrab::models::pulls::MergeableState;
     use octocrab::models::UserId;
 
     use super::*;
@@ -354,6 +355,69 @@ mod tests {
                     number: 1,
                     title: "test".to_string(),
                     body: "2".to_string(),
+                    ..Default::default()
+                },
+                User {
+                    id: UserId(1),
+                    login: "test".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+            (conn, client)
+        });
+
+        let (mut conn, client) = task.await.unwrap();
+
+        let run = CiRun::active(client.id(), 1).get_result(&mut conn).await.optional().unwrap();
+
+        assert!(run.is_some(), "Run was cancelled");
+        assert!(!AtomicBool::load(&mock.cancel, std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn test_pr_merge_status_unknown() {
+        let mut conn = get_test_connection().await;
+        let mock = MockMergeWorkFlow::default();
+        let (client, _) = MockRepoClient::new(mock.clone());
+
+        let pr = PullRequest {
+            number: 1,
+            title: "test".to_string(),
+            body: "test".to_string(),
+            mergeable_state: Some(MergeableState::Clean),
+            ..Default::default()
+        };
+
+        Pr::new(&pr, UserId(1), client.id())
+            .insert()
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+        CiRun::insert(client.id(), pr.number)
+            .base_ref(Base::from_sha("base"))
+            .head_commit_sha(Cow::Borrowed("head"))
+            .ci_branch(Cow::Borrowed("ci"))
+            .requested_by_id(1)
+            .approved_by_ids(vec![])
+            .is_dry_run(false)
+            .build()
+            .query()
+            .get_result(&mut conn)
+            .await
+            .unwrap();
+
+        let task = tokio::spawn(async move {
+            handle_with_pr(
+                &client,
+                &mut conn,
+                PullRequest {
+                    number: 1,
+                    title: "test".to_string(),
+                    body: "test".to_string(),
+                    mergeable_state: Some(MergeableState::Unknown),
                     ..Default::default()
                 },
                 User {
