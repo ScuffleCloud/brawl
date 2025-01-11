@@ -8,6 +8,8 @@ pub async fn handle<R: GitHubRepoClient>(
     _: &mut AsyncPgConnection,
     context: BrawlCommandContext<'_, R>,
 ) -> anyhow::Result<()> {
+    let config = context.repo.config().await?;
+
     // Should we also say what permissions the user has?
     context
         .repo
@@ -15,7 +17,7 @@ pub async fn handle<R: GitHubRepoClient>(
             context.pr_number,
             &messages::pong(
                 context.user.login,
-                if context.repo.config().enabled {
+                if config.is_some_and(|c| c.enabled) {
                     "enabled"
                 } else {
                     "disabled"
@@ -35,6 +37,7 @@ mod tests {
     use super::*;
     use crate::command::BrawlCommand;
     use crate::database::get_test_connection;
+    use crate::github::config::GitHubBrawlRepoConfig;
     use crate::github::merge_workflow::GitHubMergeWorkflow;
     use crate::github::models::User;
     use crate::github::repo::test_utils::{MockRepoAction, MockRepoClient};
@@ -87,7 +90,10 @@ mod tests {
         let mut conn = get_test_connection().await;
         let (mut client, mut rx) = MockRepoClient::new(MockMergeWorkFlow);
 
-        client.config.enabled = false;
+        client.config = Some(GitHubBrawlRepoConfig {
+            enabled: false,
+            ..Default::default()
+        });
 
         tokio::spawn(async move {
             handle(

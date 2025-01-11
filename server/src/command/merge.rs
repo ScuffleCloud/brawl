@@ -33,7 +33,11 @@ async fn handle_with_pr<R: GitHubRepoClient>(
     context: BrawlCommandContext<'_, R>,
     command: MergeCommand,
 ) -> anyhow::Result<()> {
-    if !context.repo.config().enabled {
+    let Some(config) = context.repo.config().await? else {
+        return Ok(());
+    };
+
+    if !config.enabled {
         return Ok(());
     }
 
@@ -122,7 +126,7 @@ async fn handle_with_pr<R: GitHubRepoClient>(
     let run = CiRun::insert(context.repo.id(), pr.number)
         .base_ref(Base::from_pr(&pr))
         .head_commit_sha(pr.head.sha.as_str().into())
-        .ci_branch(context.repo.config().merge_branch(&pr.base.ref_field).into())
+        .ci_branch(config.merge_branch(&pr.base.ref_field).into())
         .maybe_priority(command.priority.or(db_pr.default_priority))
         .requested_by_id(context.user.id.0 as i64)
         .approved_by_ids(reviewer_ids)

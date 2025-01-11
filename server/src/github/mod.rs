@@ -149,7 +149,6 @@ mod test_utils {
     use octocrab::models::{AppId, RepositoryId, UserId};
     use octocrab::{AuthState, Octocrab, OctocrabBuilder};
 
-    use super::config::GitHubBrawlRepoConfig;
     use super::installation::OrgState;
     use super::merge_workflow::GitHubMergeWorkflow;
     use super::models::{Repository, User};
@@ -231,10 +230,10 @@ mod test_utils {
     pub async fn mock_repo_client(
         octocrab: Octocrab,
         repo: Repository,
-        config: GitHubBrawlRepoConfig,
         merge_workflow: MockMergeWorkflow,
+        base_commit_sha: Option<String>,
     ) -> RepoClient<MockMergeWorkflow> {
-        RepoClient::new(repo, config, octocrab, OrgState::default(), merge_workflow)
+        RepoClient::new(repo, octocrab, OrgState::default(), merge_workflow, base_commit_sha)
     }
 
     pub fn default_repo() -> Repository {
@@ -245,6 +244,7 @@ mod test_utils {
                 login: "ScuffleCloud".to_owned(),
                 id: UserId(122814584),
             },
+            default_branch: Some("main".to_string()),
         }
     }
 
@@ -380,7 +380,7 @@ mod test {
         insta::assert_debug_snapshot!(debug_req(req).await, @r#"
         DebugReq {
             method: GET,
-            uri: "/repositories/1296269/contents/.github/brawl.toml?",
+            uri: "/repositories/1296269/git/ref/heads/master",
             headers: [
                 (
                     "content-length",
@@ -395,7 +395,7 @@ mod test {
         }
         "#);
 
-        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_config.json")));
+        resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/get_ref.json")));
 
         let service = service.await.unwrap();
 
@@ -461,7 +461,7 @@ mod test {
         insta::assert_debug_snapshot!(debug_req(req).await, @r#"
         DebugReq {
             method: GET,
-            uri: "/repositories/1296269/contents/.github/brawl.toml?",
+            uri: "/repositories/1296269/git/ref/heads/master",
             headers: [
                 (
                     "content-length",
@@ -525,7 +525,7 @@ mod test {
         insta::assert_debug_snapshot!(debug_req(req).await, @r#"
         DebugReq {
             method: GET,
-            uri: "/repositories/1296269/contents/.github/brawl.toml?",
+            uri: "/repositories/1296269/git/ref/heads/master",
             headers: [
                 (
                     "content-length",

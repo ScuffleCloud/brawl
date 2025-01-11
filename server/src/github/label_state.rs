@@ -86,7 +86,9 @@ pub async fn update_labels(
     is_dry_run: bool,
     repo_client: &impl GitHubRepoClient,
 ) -> anyhow::Result<()> {
-    let config = repo_client.config();
+    let Some(config) = repo_client.config().await? else {
+        return Ok(());
+    };
 
     let LabelsAdjustments {
         desired_labels,
@@ -245,7 +247,7 @@ mod tests {
 
         let (mut repo_client, mut rx) = MockRepoClient::new(DefaultMergeWorkflow);
 
-        repo_client.config.labels = GitHubBrawlLabelsConfig {
+        repo_client.config.as_mut().unwrap().labels = GitHubBrawlLabelsConfig {
             on_merge_queued: vec!["queued".to_string()],
             on_try_in_progress: vec!["try".to_string(), "in_progress".to_string()],
             on_merge_in_progress: vec!["merge".to_string(), "in_progress".to_string()],
@@ -384,7 +386,7 @@ mod tests {
 
         let (mut repo_client, mut rx) = MockRepoClient::new(DefaultMergeWorkflow);
 
-        repo_client.config.labels = GitHubBrawlLabelsConfig {
+        repo_client.config.as_mut().unwrap().labels = GitHubBrawlLabelsConfig {
             on_merge_queued: vec!["queued".to_string()],
             on_try_in_progress: vec!["try".to_string(), "in_progress".to_string()],
             on_merge_in_progress: vec!["merge".to_string(), "in_progress".to_string()],

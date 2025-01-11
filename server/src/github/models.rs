@@ -207,6 +207,7 @@ pub struct Repository {
     pub id: RepositoryId,
     pub name: String,
     pub owner: User,
+    pub default_branch: Option<String>,
 }
 
 impl From<octocrab::models::Repository> for Repository {
@@ -215,6 +216,7 @@ impl From<octocrab::models::Repository> for Repository {
             id: value.id,
             name: value.name,
             owner: value.owner.expect("repository has no owner").into(),
+            default_branch: value.default_branch,
         }
     }
 }
@@ -225,6 +227,7 @@ impl Default for Repository {
             id: RepositoryId(0),
             name: "repo".to_string(),
             owner: User::default(),
+            default_branch: Some("main".to_string()),
         }
     }
 }
