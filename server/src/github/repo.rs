@@ -351,9 +351,17 @@ impl<W: GitHubMergeWorkflow> GitHubRepoClient for RepoClient<W> {
     async fn create_merge(&self, message: &CommitMessage, base_sha: &str, head_sha: &str) -> anyhow::Result<MergeResult> {
         let tmp_branch = self.config().temp_branch();
 
+        // A bug related to how github handles forked repos. We need to first push the commit into the repo.
+        // Then we can do a merge.
+        // If we don't do this we get an error if the head commit has not been approved to run "via the PR approve workflow"
+        // button in the UI.
+        self.push_branch(&tmp_branch, head_sha, true)
+            .await
+            .context("push head into tmp branch")?;
+
         self.push_branch(&tmp_branch, base_sha, true)
             .await
-            .context("push tmp branch")?;
+            .context("push base into tmp branch")?;
 
         let commit = match self
             .client
@@ -1900,8 +1908,23 @@ mod tests {
         {
             // Push to tmp branch (case 1) (get ref latest commit)
             let (req, resp) = handle.next_request().await.unwrap();
-            assert!(req.uri().path().starts_with("/repositories/899726767/git/ref/heads/"));
-            assert_eq!(req.method(), Method::GET);
+            insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+            DebugReq {
+                method: GET,
+                uri: "/repositories/899726767/git/ref/heads/automation/brawl/temp/[UUID]",
+                headers: [
+                    (
+                        "content-length",
+                        "0",
+                    ),
+                    (
+                        "authorization",
+                        "REDACTED",
+                    ),
+                ],
+                body: None,
+            }
+            "#);
             resp.send_response(mock_response(
                 StatusCode::NOT_FOUND,
                 include_bytes!("mock/ref_not_found.json"),
@@ -1909,8 +1932,76 @@ mod tests {
 
             // create ref (case 1)
             let (req, resp) = handle.next_request().await.unwrap();
-            assert!(req.uri().path().starts_with("/repositories/899726767/git/refs"));
-            assert_eq!(req.method(), Method::POST);
+            insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+            DebugReq {
+                method: POST,
+                uri: "/repositories/899726767/git/refs",
+                headers: [
+                    (
+                        "content-type",
+                        "application/json",
+                    ),
+                    (
+                        "authorization",
+                        "REDACTED",
+                    ),
+                ],
+                body: Some(
+                    Object {
+                        "ref": String("refs/heads/automation/brawl/temp/[UUID]"),
+                        "sha": String("b7f8cd1bd474d5be1802377c9a0baea5eb59fcb6"),
+                    },
+                ),
+            }
+            "#);
+            resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/update_ref.json")));
+
+            let (req, resp) = handle.next_request().await.unwrap();
+            insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+            DebugReq {
+                method: GET,
+                uri: "/repositories/899726767/git/ref/heads/automation/brawl/temp/[UUID]",
+                headers: [
+                    (
+                        "content-length",
+                        "0",
+                    ),
+                    (
+                        "authorization",
+                        "REDACTED",
+                    ),
+                ],
+                body: None,
+            }
+            "#);
+            resp.send_response(mock_response(
+                StatusCode::NOT_FOUND,
+                include_bytes!("mock/ref_not_found.json"),
+            ));
+
+            let (req, resp) = handle.next_request().await.unwrap();
+            insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+            DebugReq {
+                method: POST,
+                uri: "/repositories/899726767/git/refs",
+                headers: [
+                    (
+                        "content-type",
+                        "application/json",
+                    ),
+                    (
+                        "authorization",
+                        "REDACTED",
+                    ),
+                ],
+                body: Some(
+                    Object {
+                        "ref": String("refs/heads/automation/brawl/temp/[UUID]"),
+                        "sha": String("b7f8cd1bd474d5be1802377c9a0baea5eb59fcb7"),
+                    },
+                ),
+            }
+            "#);
             resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/update_ref.json")));
 
             // Create merge (case 1)
@@ -1951,8 +2042,23 @@ mod tests {
         {
             // Push to tmp branch (case 2) (get ref latest commit)
             let (req, resp) = handle.next_request().await.unwrap();
-            assert!(req.uri().path().starts_with("/repositories/899726767/git/ref/heads/"));
-            assert_eq!(req.method(), Method::GET);
+            insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+            DebugReq {
+                method: GET,
+                uri: "/repositories/899726767/git/ref/heads/automation/brawl/temp/[UUID]",
+                headers: [
+                    (
+                        "content-length",
+                        "0",
+                    ),
+                    (
+                        "authorization",
+                        "REDACTED",
+                    ),
+                ],
+                body: None,
+            }
+            "#);
             resp.send_response(mock_response(
                 StatusCode::NOT_FOUND,
                 include_bytes!("mock/ref_not_found.json"),
@@ -1960,8 +2066,76 @@ mod tests {
 
             // create ref (case 2)
             let (req, resp) = handle.next_request().await.unwrap();
-            assert!(req.uri().path().starts_with("/repositories/899726767/git/refs"));
-            assert_eq!(req.method(), Method::POST);
+            insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+            DebugReq {
+                method: POST,
+                uri: "/repositories/899726767/git/refs",
+                headers: [
+                    (
+                        "content-type",
+                        "application/json",
+                    ),
+                    (
+                        "authorization",
+                        "REDACTED",
+                    ),
+                ],
+                body: Some(
+                    Object {
+                        "ref": String("refs/heads/automation/brawl/temp/[UUID]"),
+                        "sha": String("conflicting-sha"),
+                    },
+                ),
+            }
+            "#);
+            resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/update_ref.json")));
+
+            let (req, resp) = handle.next_request().await.unwrap();
+            insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+            DebugReq {
+                method: GET,
+                uri: "/repositories/899726767/git/ref/heads/automation/brawl/temp/[UUID]",
+                headers: [
+                    (
+                        "content-length",
+                        "0",
+                    ),
+                    (
+                        "authorization",
+                        "REDACTED",
+                    ),
+                ],
+                body: None,
+            }
+            "#);
+            resp.send_response(mock_response(
+                StatusCode::NOT_FOUND,
+                include_bytes!("mock/ref_not_found.json"),
+            ));
+
+            let (req, resp) = handle.next_request().await.unwrap();
+            insta::assert_debug_snapshot!(debug_req(req).await, @r#"
+            DebugReq {
+                method: POST,
+                uri: "/repositories/899726767/git/refs",
+                headers: [
+                    (
+                        "content-type",
+                        "application/json",
+                    ),
+                    (
+                        "authorization",
+                        "REDACTED",
+                    ),
+                ],
+                body: Some(
+                    Object {
+                        "ref": String("refs/heads/automation/brawl/temp/[UUID]"),
+                        "sha": String("b7f8cd1bd474d5be1802377c9a0baea5eb59fcb7"),
+                    },
+                ),
+            }
+            "#);
             resp.send_response(mock_response(StatusCode::OK, include_bytes!("mock/update_ref.json")));
 
             // Create merge (case 2)
