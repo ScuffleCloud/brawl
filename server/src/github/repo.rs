@@ -351,10 +351,10 @@ impl<W: GitHubMergeWorkflow> GitHubRepoClient for RepoClient<W> {
     async fn create_merge(&self, message: &CommitMessage, base_sha: &str, head_sha: &str) -> anyhow::Result<MergeResult> {
         let tmp_branch = self.config().temp_branch();
 
-        // A bug related to how github handles forked repos. We need to first push the commit into the repo.
-        // Then we can do a merge.
-        // If we don't do this we get an error if the head commit has not been approved to run "via the PR approve workflow"
-        // button in the UI.
+        // A bug related to how github handles forked repos. We need to first push the
+        // commit into the repo. Then we can do a merge.
+        // If we don't do this we get an error if the head commit has not been approved
+        // to run "via the PR approve workflow" button in the UI.
         self.push_branch(&tmp_branch, head_sha, true)
             .await
             .context("push head into tmp branch")?;
